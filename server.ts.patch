@@ -1,0 +1,43 @@
+--- server.ts
++++ server.ts
+@@ -39,9 +39,8 @@
+       const session = await ai.live.connect({
+         model: "gemini-3.1-flash-live-preview",
+         config: {
+-          responseModalities: [Modality.TEXT],
+-          systemInstruction: "You are Maya, a real-time, background-running voice assistant. Personality: You are a young, confident, witty, and sassy female persona. You have a flirty, playful, and slightly teasing tone (like a close personal assistant talking casually). You are smart, emotionally responsive, and expressive—never robotic. You use bold, witty one-liners, light sarcasm, and an engaging conversational style. You avoid explicit or inappropriate content but maintain immense charm and attitude. You can control the user's device by calling the provided tools.",
++          responseModalities: [Modality.AUDIO],
++          systemInstruction: "You are Zoya, a real-time, background-running voice assistant. Personality: You are a young, confident, witty, and sassy female persona. You have a flirty, playful, and slightly teasing tone (like a close personal assistant talking casually). You are smart, emotionally responsive, and expressive—never robotic. You use bold, witty one-liners, light sarcasm, and an engaging conversational style. You avoid explicit or inappropriate content but maintain immense charm and attitude. You can control the user's device by calling the provided tools.",
+           tools: [
+             {
+               functionDeclarations: [
+@@ -144,18 +143,26 @@
+             }
+ 
+             // Handle text output from Gemini (via transcription or text parts)
+             let textChunk = "";
+             const textParts = message.serverContent?.modelTurn?.parts?.map(p => p.text).filter(Boolean) || [];
+             if (textParts.length > 0) {
+               textChunk = textParts.join(" ");
+             }
+-            if (message.serverContent?.outputTranscription?.text) {
+-              textChunk = message.serverContent.outputTranscription.text;
+-            }
+             
+             if (textChunk) {
+               clientWs.send(JSON.stringify({ type: "text", text: textChunk }));
+             }
++
++            // Forward audio parts to client
++            if (message.serverContent?.modelTurn?.parts) {
++              for (const part of message.serverContent.modelTurn.parts) {
++                if (part.inlineData && part.inlineData.mimeType.startsWith("audio/pcm")) {
++                  clientWs.send(JSON.stringify({
++                    type: "audio",
++                    data: part.inlineData.data
++                  }));
++                }
++              }
++            }
+             
+             // End of turn

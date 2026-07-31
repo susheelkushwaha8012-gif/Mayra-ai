@@ -1,0 +1,10 @@
+{
+  "name": "Zoya Assistant",
+  "description": "A real-time voice assistant web app simulating an Android experience with Gemini Live.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
