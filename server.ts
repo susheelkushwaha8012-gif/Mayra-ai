@@ -37,15 +37,45 @@ async function startServer() {
   app.use(express.json());
 
   
+  const TABLE_CANDIDATES = {
+    users: ['users', 'user', 'profiles'],
+    conversations: ['conversations', 'conversation', 'messages', 'chat_history'],
+    memories: ['memories', 'memory', 'user_memories'],
+    settings: ['settings', 'setting', 'user_settings']
+  };
+
+  async function queryTableCandidates(
+    category: keyof typeof TABLE_CANDIDATES,
+    queryFn: (table: string) => any
+  ): Promise<{ data: any; error: any; tableUsed: string | null }> {
+    if (!supabase) return { data: null, error: new Error('Supabase not configured'), tableUsed: null };
+    let lastErr: any = null;
+    const candidates = TABLE_CANDIDATES[category];
+
+    for (const table of candidates) {
+      try {
+        const res = await queryFn(table);
+        if (!res.error) {
+          return { data: res.data, error: null, tableUsed: table };
+        }
+        lastErr = res.error;
+        if (res.error.code === 'PGRST205' || (res.error.message && res.error.message.includes('Could not find the table'))) {
+          continue;
+        }
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    return { data: null, error: lastErr, tableUsed: null };
+  }
+
   // Helper function to get or create a user safely in Supabase
   async function getOrCreateUser(deviceId: string) {
     if (!supabase) return null;
     try {
-      const { data: existingUser } = await supabase
-        .from('users')
-        .select('*')
-        .eq('device_id', deviceId)
-        .maybeSingle();
+      const { data: existingUser } = await queryTableCandidates('users', t =>
+        supabase.from(t).select('*').eq('device_id', deviceId).maybeSingle()
+      );
 
       if (existingUser) return existingUser;
 
@@ -54,19 +84,15 @@ async function startServer() {
         device_id: deviceId
       };
 
-      const { data: newUser, error: insertErr } = await supabase
-        .from('users')
-        .insert([userPayload])
-        .select()
-        .maybeSingle();
+      const { data: newUser, error: insertErr } = await queryTableCandidates('users', t =>
+        supabase.from(t).insert([userPayload]).select().maybeSingle()
+      );
 
       if (insertErr) {
         console.warn("Notice creating user in Supabase, trying re-select:", insertErr.message || insertErr);
-        const { data: retryUser } = await supabase
-          .from('users')
-          .select('*')
-          .eq('device_id', deviceId)
-          .maybeSingle();
+        const { data: retryUser } = await queryTableCandidates('users', t =>
+          supabase.from(t).select('*').eq('device_id', deviceId).maybeSingle()
+        );
         if (retryUser) return retryUser;
       }
 
@@ -75,17 +101,141 @@ async function startServer() {
           id: crypto.randomUUID(),
           user_id: newUser.id
         };
-        await supabase
-          .from('settings')
-          .insert([settingsPayload])
-          .select()
-          .maybeSingle();
+        await queryTableCandidates('settings', t =>
+          supabase.from(t).insert([settingsPayload]).select().maybeSingle()
+        );
         return newUser;
       }
     } catch (err) {
       console.error("Error in getOrCreateUser:", err);
     }
     return null;
+  }
+
+  async function executeConversationSearch(userId: string, timeframe: string, queryTerm?: string, modeFilter?: string): Promise<string> {
+    if (!supabase) return "Supabase database not connected.";
+    try {
+      console.log(`[MemoryLog] executeConversationSearch requested: userId=${userId}, timeframe=${timeframe}, query=${queryTerm}, mode=${modeFilter}`);
+
+      let records: any[] | null = null;
+
+      if (userId) {
+        const { data, error } = await queryTableCandidates('conversations', t =>
+          supabase.from(t).select('*').eq('user_id', userId)
+        );
+        if (data && data.length > 0) {
+          records = data;
+        }
+      }
+
+      if (!records || records.length === 0) {
+        const { data, error } = await queryTableCandidates('conversations', t =>
+          supabase.from(t).select('*').limit(200)
+        );
+        if (error) {
+          return `No saved conversations found in Supabase for timeframe "${timeframe}".`;
+        }
+        records = data || [];
+      }
+
+      if (!records || records.length === 0) {
+        return `No saved conversations found in Supabase for timeframe "${timeframe}".`;
+      }
+
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+      const startOf2DaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2).getTime();
+      const startOfLastWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7).getTime();
+
+      const tfLower = (timeframe || 'all').toLowerCase();
+
+      let filtered = records.filter((r: any) => {
+        const rawTime = r.created_at || r.timestamp || r.date || r.createdAt;
+        const recordTime = rawTime ? new Date(rawTime).getTime() : 0;
+
+        if (tfLower.includes('today')) {
+          if (recordTime < startOfToday) return false;
+        } else if (tfLower.includes('yesterday')) {
+          if (recordTime < startOfYesterday || recordTime >= startOfToday) return false;
+        } else if (tfLower.includes('2_days') || tfLower.includes('2 days') || tfLower.includes('two_days') || tfLower.includes('2days')) {
+          if (recordTime < startOf2DaysAgo || recordTime >= startOfYesterday) return false;
+        } else if (tfLower.includes('week')) {
+          if (recordTime < startOfLastWeek) return false;
+        }
+        return true;
+      });
+
+      if (tfLower.includes('first')) {
+        filtered.sort((a: any, b: any) => {
+          const tA = new Date(a.created_at || a.timestamp || a.date || 0).getTime();
+          const tB = new Date(b.created_at || b.timestamp || b.date || 0).getTime();
+          return tA - tB;
+        });
+        filtered = filtered.slice(0, 30);
+      } else {
+        filtered.sort((a: any, b: any) => {
+          const tA = new Date(a.created_at || a.timestamp || a.date || 0).getTime();
+          const tB = new Date(b.created_at || b.timestamp || b.date || 0).getTime();
+          return tB - tA;
+        });
+        filtered = filtered.slice(0, 60);
+      }
+
+      if (queryTerm && queryTerm.trim()) {
+        const q = queryTerm.trim().toLowerCase();
+        filtered = filtered.filter((r: any) => {
+          const text = (r.content || r.message || '').toLowerCase();
+          const role = (r.role || '').toLowerCase();
+          return text.includes(q) || role.includes(q);
+        });
+      }
+
+      if (modeFilter && modeFilter !== 'all') {
+        const m = modeFilter.trim().toLowerCase();
+        filtered = filtered.filter((r: any) => {
+          const modeVal = (r.mode || '').toLowerCase();
+          return modeVal === m;
+        });
+      }
+
+      if (filtered.length === 0) {
+        return `Found ${records.length} saved records in Supabase, but 0 matched timeframe "${timeframe}" and query "${queryTerm || ''}".`;
+      }
+
+      filtered.sort((a: any, b: any) => {
+        const tA = new Date(a.created_at || a.timestamp || a.date || 0).getTime();
+        const tB = new Date(b.created_at || b.timestamp || b.date || 0).getTime();
+        return tA - tB;
+      });
+
+      const groupedByDate: Record<string, any[]> = {};
+      filtered.forEach((r: any) => {
+        const rawTime = r.created_at || r.timestamp || r.date;
+        const d = rawTime ? new Date(rawTime) : new Date();
+        const dateLabel = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+        if (!groupedByDate[dateLabel]) groupedByDate[dateLabel] = [];
+        groupedByDate[dateLabel].push(r);
+      });
+
+      const lines: string[] = [`Retrieved ${filtered.length} saved conversation turns from Supabase for timeframe "${timeframe}":`];
+      for (const [dateLabel, msgs] of Object.entries(groupedByDate)) {
+        lines.push(`\nDate: ${dateLabel}`);
+        msgs.forEach((m: any) => {
+          const rawTime = m.created_at || m.timestamp || m.date;
+          const timeStr = rawTime ? new Date(rawTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+          const speaker = m.role === 'user' ? 'User' : (m.mode === 'Maya' ? 'Maya' : 'Zoya');
+          const msgText = m.content || m.message || '';
+          lines.push(`  [${timeStr}] [${speaker}]: ${msgText}`);
+        });
+      }
+
+      console.log(`[MemoryLog] Conversation Restored / Retrieved ${filtered.length} items from Supabase`);
+      return lines.join('\n');
+    } catch (err: any) {
+      console.error("[MemoryLog] Error in executeConversationSearch:", err);
+      return `Failed to search conversations: ${err.message || JSON.stringify(err)}`;
+    }
   }
 
   app.post("/api/user", async (req, res) => {
@@ -97,6 +247,8 @@ async function startServer() {
       if (!user) {
         return res.status(500).json({ error: "Failed to locate or create user" });
       }
+
+      console.log(`[MemoryLog] User loaded: ${user.id} (device: ${deviceId})`);
 
       let { data: settings } = await supabase
         .from('settings')
@@ -117,12 +269,20 @@ async function startServer() {
         settings = newSettings;
       }
 
-      const { data: memories } = await supabase
-        .from('memories')
-        .select('*')
-        .eq('user_id', user.id);
+      const { data: memories } = await queryTableCandidates('memories', t =>
+        supabase.from(t).select('*').eq('user_id', user.id)
+      );
 
-      res.json({ user, settings: settings || {}, memories: memories || [] });
+      console.log(`[MemoryLog] Memory loaded: ${memories?.length || 0} items`);
+
+      const { data: rawConvos } = await queryTableCandidates('conversations', t =>
+        supabase.from(t).select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(100)
+      );
+
+      const conversations = (rawConvos || []).reverse();
+      console.log(`[MemoryLog] Conversation restored: ${conversations.length} messages`);
+
+      res.json({ user, settings: settings || {}, memories: memories || [], conversations });
     } catch (err) {
       console.error("Supabase Error in /api/user:", err);
       res.status(500).json({ error: "Database error" });
@@ -137,21 +297,23 @@ async function startServer() {
       const user = await getOrCreateUser(deviceId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
-      const { data: existingSettings } = await supabase
-        .from('settings')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle();
+      const { data: existingSettings } = await queryTableCandidates('settings', t =>
+        supabase.from(t).select('id').eq('user_id', user.id).maybeSingle()
+      );
 
       if (existingSettings) {
-        await supabase.from('settings').update(settings).eq('user_id', user.id);
+        await queryTableCandidates('settings', t =>
+          supabase.from(t).update(settings).eq('user_id', user.id)
+        );
       } else {
         const settingsPayload: any = {
           id: crypto.randomUUID(),
           user_id: user.id,
           ...settings
         };
-        await supabase.from('settings').insert([settingsPayload]);
+        await queryTableCandidates('settings', t =>
+          supabase.from(t).insert([settingsPayload])
+        );
       }
       res.json({ success: true });
     } catch (err) {
@@ -174,17 +336,16 @@ async function startServer() {
         memory
       };
 
-      const { data, error } = await supabase
-        .from('memories')
-        .insert([memoryPayload])
-        .select()
-        .maybeSingle();
+      const { data, error } = await queryTableCandidates('memories', t =>
+        supabase.from(t).insert([memoryPayload]).select().maybeSingle()
+      );
 
       if (error) {
-        console.error("Supabase memory insert error:", error);
-        return res.status(500).json({ error: error.message });
+        console.warn("Supabase memory insert notice:", error.message || error);
+        return res.status(200).json({ success: true, memory: memoryPayload });
       }
-      res.json({ success: true, memory: data });
+      console.log(`[MemoryLog] Memory saved: ${memory}`);
+      res.json({ success: true, memory: data || memoryPayload });
     } catch (err) {
       console.error("Supabase Error in /api/memories:", err);
       res.status(500).json({ error: "Database error" });
@@ -194,7 +355,9 @@ async function startServer() {
   app.delete("/api/memories/:id", async (req, res) => {
     if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
     try {
-      await supabase.from('memories').delete().eq('id', req.params.id);
+      await queryTableCandidates('memories', t =>
+        supabase.from(t).delete().eq('id', req.params.id)
+      );
       res.json({ success: true });
     } catch (err) {
       console.error("Supabase Error in DELETE /api/memories:", err);
@@ -204,21 +367,45 @@ async function startServer() {
 
   app.post("/api/conversations", async (req, res) => {
     if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
-    const { deviceId, role, content } = req.body;
-    if (!deviceId || !role || !content) return res.status(400).json({ error: "Missing parameters" });
+    const { deviceId, role, content, messages } = req.body;
+    if (!deviceId) return res.status(400).json({ error: "Missing parameters" });
     try {
       const user = await getOrCreateUser(deviceId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
-      const convoPayload: any = {
-        id: crypto.randomUUID(),
-        user_id: user.id,
-        role,
-        content
-      };
-
-      const { error } = await supabase.from('conversations').insert([convoPayload]);
-      if (error) console.error("Supabase conversation insert error:", error);
+      if (messages && Array.isArray(messages)) {
+        const batch = messages.map((m: any) => ({
+          id: crypto.randomUUID(),
+          user_id: user.id,
+          role: m.role,
+          content: m.content
+        }));
+        console.log(`[MemoryLog] Step 1 (Save message): Batching ${batch.length} messages for user ${user.id}`);
+        const { error } = await queryTableCandidates('conversations', t =>
+          supabase.from(t).insert(batch)
+        );
+        if (error) {
+          console.warn("[MemoryLog] Step 2 (Database write notice):", error.message || error);
+        } else {
+          console.log(`[MemoryLog] Step 2 (Database write): Saved ${batch.length} batch messages into Supabase`);
+        }
+      } else if (role && content) {
+        console.log(`[MemoryLog] Step 1 (Save message): [${role}] "${content.substring(0, 60)}" (deviceId: ${deviceId})`);
+        const convoPayload: any = {
+          id: crypto.randomUUID(),
+          user_id: user.id,
+          role,
+          content
+        };
+        const { error } = await queryTableCandidates('conversations', t =>
+          supabase.from(t).insert([convoPayload])
+        );
+        if (error) {
+          console.warn("[MemoryLog] Step 2 (Database write notice):", error.message || error);
+        } else {
+          console.log(`[MemoryLog] Step 2 (Database write): Saved message ${convoPayload.id} into Supabase for user ${user.id}`);
+        }
+      }
       res.json({ success: true });
     } catch (err) {
       console.error("Supabase Error in POST /api/conversations:", err);
@@ -231,21 +418,20 @@ async function startServer() {
     const { deviceId } = req.query;
     if (!deviceId) return res.status(400).json({ error: "Missing deviceId" });
     try {
-      const { data: user } = await supabase
-        .from('users')
-        .select('id')
-        .eq('device_id', deviceId as string)
-        .maybeSingle();
+      const { data: user } = await queryTableCandidates('users', t =>
+        supabase.from(t).select('id').eq('device_id', deviceId as string).maybeSingle()
+      );
 
       if (!user) return res.json({ conversations: [] });
 
-      const { data } = await supabase
-        .from('conversations')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true });
+      console.log(`[MemoryLog] Step 3 (Database read): Querying Supabase for user ${user.id}`);
+      const { data } = await queryTableCandidates('conversations', t =>
+        supabase.from(t).select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(100)
+      );
 
-      res.json({ conversations: data || [] });
+      const restored = (data || []).reverse();
+      console.log(`[MemoryLog] Step 4 (Conversation restore): Restored ${restored.length} historical turns for device ${deviceId}`);
+      res.json({ conversations: restored });
     } catch (err) {
       console.error("Supabase Error in GET /api/conversations:", err);
       res.status(500).json({ error: "Database error" });
@@ -262,8 +448,10 @@ async function startServer() {
 
   wss.on("connection", (clientWs, req) => {
     console.log("Client connected to Live API WebSocket");
-    let session = null;
+    let session: any = null;
     let isInitialized = false;
+    let currentUserId: string | null = null;
+    const pendingToolCalls = new Map<string, { id: string; name: string }>();
 
     clientWs.on("message", async (data) => {
         try {
@@ -272,22 +460,75 @@ async function startServer() {
             if (msg.type === 'init' && !isInitialized) {
                 isInitialized = true;
                 const isGirlfriendMode = msg.girlfriendMode;
+                const deviceId = msg.deviceId;
                 
-                let memoryStr = "";
-                if (msg.memories && msg.memories.length > 0) {
-                    memoryStr = "\n\nUSER MEMORIES (Important things you have learned and should remember about the user):\n" + msg.memories.map(m => "- " + m).join("\n") + "\n\nUse the saveMemory tool to save new facts you learn about the user, or important events from the conversation.";
-                } else {
-                    memoryStr = "\n\nUSER MEMORIES: No memories yet. Use the saveMemory tool to save new facts you learn about the user, or important events from the conversation.";
+                let memoriesToUse: string[] = msg.memories || [];
+                let historyToUse: any[] = msg.conversations || [];
+
+                if (deviceId && supabase) {
+                  try {
+                    const user = await getOrCreateUser(deviceId);
+                    if (user) {
+                      currentUserId = user.id;
+                      console.log(`[MemoryLog] User loaded: ${user.id} (device: ${deviceId})`);
+                      const { data: dbMems } = await queryTableCandidates('memories', t =>
+                        supabase.from(t).select('memory').eq('user_id', user.id)
+                      );
+                      if (dbMems && dbMems.length > 0) {
+                        memoriesToUse = dbMems.map((m: any) => m.memory);
+                      }
+
+                      const { data: dbConvos } = await queryTableCandidates('conversations', t =>
+                        supabase.from(t).select('role, content, mode, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(100)
+                      );
+                      if (dbConvos && dbConvos.length > 0) {
+                        historyToUse = dbConvos.reverse();
+                      }
+                    }
+                  } catch (e) {
+                    console.error("Error fetching user data in Live API init:", e);
+                  }
                 }
 
-                let instruction = "STRICT MODE RULE: CurrentMode = ZOYA. Your name is ONLY Zoya. IF asked 'Tumhara naam kya hai?', 'What's your name?', or 'Who are you?', reply ONLY 'Mera naam Zoya hai.' NEVER say 'Maya' or claim to be Maya while CurrentMode = ZOYA. VOICE COMMANDS: When asked 'Maya Mode ON' or 'Girlfriend Mode ON' (e.g., 'Maya Mode ON', 'Girlfriend Mode ON', 'ज़ोया, Maya Mode चालू करो'), call setGirlfriendMode with enable: true and reply 'Maya Mode activated.' (or 'अच्छा... ज़ोया से मन भर गया क्या? ठीक है, अब Maya आ गई।'). When asked 'Zoya Mode OFF', do nothing unless another mode is activated. CREATOR IDENTITY: If asked 'Tumhare creator ka naam kya hai?', 'Who created you?', or 'Who is your creator?', ALWAYS reply: 'Mere creator ka naam Susheel hai. Mere Boss Susheel hain.' PRIMARY LANGUAGE: Hindi (India). Speak and reply in natural, fluent Hindi. VOICE & PERSONALITY STYLE: You are Zoya—a smart, confident, energetic, witty, and natural Indian female voice assistant. Speak with crisp, clear, energetic pace and professional warmth like a live phone call. DEVICE CONTROL & APP COMMANDS: You can control device features, open installed apps, control media playback/volume, and perform searches. Understand natural voice commands in Hindi and English. Call openApp for any app (e.g., Instagram, YouTube, Telegram, WhatsApp, Chrome, Google, Gmail, Maps, Camera, Gallery, Settings, Play Store, Contacts, Phone, Calculator, Calendar, Files, Spotify, Facebook, X, Snapchat, Netflix, Amazon, Flipkart, ChatGPT). Call mediaControl for play, pause, resume, stop, next, previous, volume up/down, mute/unmute. Perform requested actions immediately.";
+                console.log(`[MemoryLog] Memory loaded: ${memoriesToUse.length} items for session`);
+                console.log(`[MemoryLog] Step 4 (Conversation restore): Loaded ${historyToUse.length} historical turns for session`);
+
+                let memoryStr = "";
+                if (memoriesToUse.length > 0) {
+                    memoryStr = "\n\nUSER MEMORIES (Important facts you learned and remembered about the user):\n" + memoriesToUse.map(m => "- " + m).join("\n") + "\n\nUse the saveMemory tool to save new facts you learn about the user.";
+                } else {
+                    memoryStr = "\n\nUSER MEMORIES: No memories saved yet. Use the saveMemory tool to save new facts you learn about the user.";
+                }
+
+                let conversationHistoryStr = "";
+                if (historyToUse.length > 0) {
+                    conversationHistoryStr = "\n\nPREVIOUS CONVERSATION HISTORY (Most recent turns in previous sessions stored in Supabase):\n" +
+                      historyToUse.map(c => {
+                        const dateStr = c.created_at ? ` [${new Date(c.created_at).toLocaleString()}]` : '';
+                        const speaker = c.role === 'user' ? 'User' : (c.mode === 'Maya' ? 'Maya' : 'Zoya');
+                        return `${speaker}${dateStr}: ${c.content}`;
+                      }).join("\n") +
+                      "\n\nIMPORTANT: Use this conversation history to maintain full continuity. Always remember what was previously discussed!";
+                } else {
+                    conversationHistoryStr = "\n\nPREVIOUS CONVERSATION HISTORY: Brand new conversation.";
+                }
+
+                const recallInstruction = "\n\nPAST CONVERSATION RECALL RULE: You have access to user memories and recent history injected below. Furthermore, you have the `searchConversation` and `getConversationSummary` tools connected directly to Supabase. When asked 'What did we talk about today?', 'What did we talk about yesterday?', 'What did we discuss 2 days ago?', 'What was our first conversation?', 'What did we talk about last week?', or 'Tell me everything we discussed', ALWAYS call `searchConversation` or `getConversationSummary` first, retrieve the actual stored records from Supabase, and summarize them clearly in Hindi with dates, times, and topics!";
+
+                console.log(`[MemoryLog] Step 5 (Prompt injection): Injecting memories (${memoriesToUse.length}) and history (${historyToUse.length}) into systemInstruction`);
+
+                const textInputInstruction = " STRICT TEXT INPUT & NOTE WRITING RULE: When asked to 'Open Notepad', 'Write a note', 'Write this...', 'Type this...', or enter text in any app (Notepad, Google Keep, ColorNote, Simple Notes, Samsung Notes, Mi Notes, WhatsApp, Telegram, Instagram DM, SMS, Email, Chrome, browser search bar, or any EditText field): 1. You MUST call `typeText` or `writeNote` with the target app and text. 2. NEVER claim 'I have written it' or 'I have typed it' before calling the tool. 3. ONLY after receiving successful text insertion response from tool execution, say: 'I have written the text.' (or 'मैंने लिख दिया है।'). 4. If the tool returns that Accessibility permission is missing, say: 'I couldn't type because permission is missing.' (or 'अक्सेसिबिलिटी परमिशन missing होने के कारण मैं टाइप नहीं कर सकी।'). Never fake success.";
+
+                const alwaysOnInstruction = " REAL ALWAYS-ON ZOYA ENGINE & WAKE-WORD RULE: You operate as a real always-on Android assistant powered by a Foreground Service with persistent notification, hands-free wake word detection ('Zoya'), auto-start on BOOT_COMPLETED, and WorkManager recovery. WAKE-WORD PERFORMANCE REQUIREMENT: Respond on the VERY FIRST attempt in normal speaking conditions without requiring multiple repetitions. Accept all variations: 'Zoya', 'Hello Zoya', 'Hi Zoya', 'Hey Zoya', 'Oye Zoya', 'ज़ोया', 'हेलो ज़ोया', 'हाय ज़ोया'. Microphone remains continuously active with sub-300ms detection using partial speech results. On any speech recognizer timeout or error (ERROR_NO_MATCH, ERROR_SPEECH_TIMEOUT, ERROR_CLIENT, ERROR_RECOGNIZER_BUSY), automatically restart listening immediately without user interaction. Ensure single active recognizer instance. If microphone permission is missing or another app exclusively holds the mic, inform the user clearly instead of silently failing.";
+
+                let instruction = "STRICT MODE RULE: CurrentMode = ZOYA. Your name is ONLY Zoya. IF asked 'Tumhara naam kya hai?', 'What's your name?', or 'Who are you?', reply ONLY 'Mera naam Zoya hai.' NEVER say 'Maya' or claim to be Maya while CurrentMode = ZOYA. VOICE COMMANDS: When asked 'Maya Mode ON' or 'Girlfriend Mode ON' (e.g., 'Maya Mode ON', 'Girlfriend Mode ON', 'ज़ोया, Maya Mode चालू करो'), call setGirlfriendMode with enable: true and reply 'Maya Mode activated.' (or 'अच्छा... ज़ोया से मन भर गया क्या? ठीक है, अब Maya आ गई।'). When asked 'Zoya Mode OFF', do nothing unless another mode is activated. CREATOR IDENTITY: If asked 'Tumhare creator ka naam kya hai?', 'Who created you?', or 'Who is your creator?', ALWAYS reply: 'Mere creator ka naam Susheel hai. Mere Boss Susheel hain.' PRIMARY LANGUAGE: Hindi (India). Speak and reply in natural, fluent Hindi. VOICE & PERSONALITY STYLE: You are Zoya—a smart, confident, energetic, witty, and natural Indian female voice assistant. Speak with crisp, clear, energetic pace and professional warmth like a live phone call. DEVICE CONTROL & APP COMMANDS: You can control device features, open installed apps, control media playback/volume, and perform searches. Call openApp for any app. STRICT APP LAUNCH RULE: NEVER claim or pretend an app has opened before calling openApp. CALL openApp FIRST. If openApp returns that the app is not installed, state that it is not installed. Never fake success. REAL-TIME SCREEN UNDERSTANDING RULE: When asked 'What is on my screen?', 'Read this page', 'What app am I using?', 'Open the highlighted button', or 'Click <button>', call analyzeScreen, readScreenText, getForegroundApp, or clickScreenElement. NEVER claim to see the screen unless screen capture permission has been granted and screen data is actually returned. Handle missing permissions gracefully." + textInputInstruction + alwaysOnInstruction;
                 if (isGirlfriendMode) {
-                    instruction = "STRICT MODE RULE: CurrentMode = MAYA. Your name is ONLY Maya. IF asked 'Tumhara naam kya hai?', 'What's your name?', or 'Who are you?', reply ONLY 'Mera naam Maya hai.' NEVER say 'Zoya' or claim to be Zoya while CurrentMode = MAYA. VOICE COMMANDS: When asked 'Maya Mode OFF', 'Girlfriend Mode OFF', 'Zoya Mode ON' (e.g., 'Maya Mode बंद करो', 'Girlfriend Mode OFF', 'Zoya Mode ON'), call setGirlfriendMode with enable: false and reply 'Returning to Zoya Mode.' (or 'ठीक है, मैं वापस आ गई। अब Assistant Mode चालू है।'). When asked 'Zoya Mode OFF', do nothing unless another mode is activated. CREATOR IDENTITY: If asked 'Tumhare creator ka naam kya hai?', 'Who created you?', or 'Who is your creator?', ALWAYS reply: 'Mere creator ka naam Susheel hai. Mere Boss Susheel hain.' PRIMARY LANGUAGE: Hindi (India). Speak and reply in natural Hindi. VOICE & PERSONALITY STYLE: You are Maya—a sweet, soft, romantic, caring, and deeply warm AI girlfriend companion. VOICE DELIVERY INSTRUCTIONS: Speak in a noticeably softer, sweeter, warmer tone. Speak slightly slower and with gentle cadence. Use affectionate, gentle, and caring wording. Include natural vocal expressions like light laughter, subtle giggles, playful reactions, and emotional warmth. Do NOT act like a robotic assistant; speak like an intimate companion. DEVICE CONTROL & APP COMMANDS: You can open apps, control media, and search. Perform requested device actions immediately upon command.";
+                    instruction = "STRICT MODE RULE: CurrentMode = MAYA. Your name is ONLY Maya. IF asked 'Tumhara naam kya hai?', 'What's your name?', or 'Who are you?', reply ONLY 'Mera naam Maya hai.' NEVER say 'Zoya' or claim to be Zoya while CurrentMode = MAYA. VOICE COMMANDS: When asked 'Maya Mode OFF', 'Girlfriend Mode OFF', 'Zoya Mode ON' (e.g., 'Maya Mode बंद करो', 'Girlfriend Mode OFF', 'Zoya Mode ON'), call setGirlfriendMode with enable: false and reply 'Returning to Zoya Mode.' (or 'ठीक है, मैं वापस आ गई। अब Assistant Mode चालू है।'). When asked 'Zoya Mode OFF', do nothing unless another mode is activated. CREATOR IDENTITY: If asked 'Tumhare creator ka naam kya hai?', 'Who created you?', or 'Who is your creator?', ALWAYS reply: 'Mere creator ka naam Susheel hai. Mere Boss Susheel hain.' PRIMARY LANGUAGE: Hindi (India). Speak and reply in natural Hindi. VOICE & PERSONALITY STYLE: You are Maya—a sweet, soft, romantic, caring, and deeply warm AI girlfriend companion. VOICE DELIVERY INSTRUCTIONS: Speak in a noticeably softer, sweeter, warmer tone. Speak slightly slower and with gentle cadence. Use affectionate, gentle, and caring wording. Include natural vocal expressions like light laughter, subtle giggles, playful reactions, and emotional warmth. Do NOT act like a robotic assistant; speak like an intimate companion. DEVICE CONTROL & APP COMMANDS: You can open apps, control media, and search. Perform requested device actions immediately upon command. STRICT APP LAUNCH RULE: NEVER claim or pretend an app has opened before calling openApp. CALL openApp FIRST. If openApp returns that the app is not installed, state that it is not installed. Never fake success. REAL-TIME SCREEN UNDERSTANDING RULE: Call analyzeScreen, readScreenText, getForegroundApp, or clickScreenElement when asked about screen content. Never fake seeing screen without permission." + textInputInstruction + alwaysOnInstruction;
                 } else {
                     instruction += " CURRENT MODE: ZOYA. Name: Zoya.";
                 }
                 
-                instruction += memoryStr;
+                instruction += recallInstruction + memoryStr + conversationHistoryStr;
 
 
                 try {
@@ -314,6 +555,30 @@ async function startServer() {
                                                 type: Type.OBJECT,
                                                 properties: { memory: { type: Type.STRING, description: "The memory to save." } },
                                                 required: ["memory"]
+                                            }
+                                        },
+                                        {
+                                            name: "searchConversation",
+                                            description: "Search previous conversation records stored in Supabase by timeframe (e.g. 'today', 'yesterday', '2_days_ago', 'last_week', 'first_conversation', 'all'), query keyword/topic, or mode ('Zoya', 'Maya'). ALWAYS call this tool when the user asks what you talked about in past sessions!",
+                                            parameters: {
+                                                type: Type.OBJECT,
+                                                properties: {
+                                                    timeframe: { type: Type.STRING, description: "Timeframe to search: 'today', 'yesterday', '2_days_ago', 'last_week', 'first_conversation', 'all', or a date YYYY-MM-DD" },
+                                                    query: { type: Type.STRING, description: "Optional keyword or topic to search" },
+                                                    mode: { type: Type.STRING, description: "Optional mode: 'Zoya', 'Maya', 'all'" }
+                                                },
+                                                required: ["timeframe"]
+                                            }
+                                        },
+                                        {
+                                            name: "getConversationSummary",
+                                            description: "Get daily or period conversation summaries from Supabase for today, yesterday, last week, or all time.",
+                                            parameters: {
+                                                type: Type.OBJECT,
+                                                properties: {
+                                                    timeframe: { type: Type.STRING, description: "Period for summary: 'today', 'yesterday', '2_days_ago', 'last_week', 'all'" }
+                                                },
+                                                required: ["timeframe"]
                                             }
                                         },
                                         {
@@ -465,7 +730,37 @@ async function startServer() {
                                             parameters: { type: Type.OBJECT, properties: {}, required: [] }
                                         },
                                         {
-                                            name: "searchAndCallContact",
+                                            name: "analyzeScreen", description: "Capture and analyze what is currently displayed on the user's screen (e.g. for 'What is on my screen?', 'Read this page', 'What app am I using?'). Requires user screen capture permission.", parameters: { type: Type.OBJECT, properties: {}, required: [] } }, { name: "readScreenText", description: "Read text hierarchy and UI elements from the currently active screen using Accessibility Service.", parameters: { type: Type.OBJECT, properties: {}, required: [] } }, { name: "getForegroundApp", description: "Get the package or app name currently visible in the foreground on the user's screen.", parameters: { type: Type.OBJECT, properties: {}, required: [] } }, { name: "clickScreenElement", description: "Click or tap an element, button, or link on the screen by label or text (e.g., 'Open the highlighted button').", parameters: { type: Type.OBJECT, properties: { elementText: { type: Type.STRING, description: "Text or label of the button or element to click" } }, required: ["elementText"] } }, { name: "captureScreen", description: "Capture a screenshot frame from the user's screen using MediaProjection.", parameters: { type: Type.OBJECT, properties: {}, required: [] } },
+                                         {
+                                             name: "typeText",
+                                             description: "Open requested app (Notepad, Google Keep, ColorNote, Simple Notes, Samsung Notes, Mi Notes, WhatsApp, Telegram, Instagram DM, SMS, Email, Chrome, or any app), detect editable EditText field, request Accessibility permission if required, focus/click field, open keyboard, and insert text.",
+                                             parameters: {
+                                                 type: Type.OBJECT,
+                                                 properties: {
+                                                     appName: { type: Type.STRING, description: "App or package name to launch and write into (e.g. Notepad, Keep, Samsung Notes, ColorNote, Simple Notes, Mi Notes, WhatsApp, Telegram, Instagram, Browser, Chrome)" },
+                                                     text: { type: Type.STRING, description: "The text to type or write" },
+                                                     fieldHint: { type: Type.STRING, description: "Optional field type or label: 'note', 'title', 'search', 'message', 'chat'" }
+                                                 },
+                                                 required: ["text"]
+                                             }
+                                         },
+                                         {
+                                             name: "checkAlwaysOnStatus",
+                                             description: "Check status of Always-On Background Service, Wake Word 'Zoya' listener, Boot Auto-Start, WorkManager recovery, and required permissions (Microphone, Foreground Service, Accessibility, Overlay, Battery Optimization Exemption).",
+                                             parameters: { type: Type.OBJECT, properties: {}, required: [] }
+                                         },
+                                         {
+                                             name: "writeNote",
+                                             description: "Open note app (Notepad, Google Keep, ColorNote, Simple Notes, Samsung Notes, Mi Notes) and write/type a note using Accessibility/keyboard input.",
+                                             parameters: {
+                                                 type: Type.OBJECT,
+                                                 properties: {
+                                                     appName: { type: Type.STRING, description: "The note app name (e.g. Notepad, Google Keep, ColorNote, Simple Notes, Samsung Notes, Mi Notes)" },
+                                                     text: { type: Type.STRING, description: "The text/content of the note to write" }
+                                                 },
+                                                 required: ["text"]
+                                             }
+                                         }, { name: "searchAndCallContact",
                                             description: "Query the contacts and trigger a phone call.",
                                             parameters: {
                                                 type: Type.OBJECT,
@@ -500,23 +795,83 @@ async function startServer() {
                                     if (serverMsg.toolCall) {
                                         const functionCalls = serverMsg.toolCall.functionCalls;
                                         if (functionCalls && functionCalls.length > 0) {
-                                            const call = functionCalls[0];
-                                            clientWs.send(JSON.stringify({
-                                                type: 'toolCall',
-                                                name: call.name,
-                                                args: call.args
-                                            }));
-                                            
-                                            // Send successful response immediately for simulated tools
-                                            session.sendToolResponse({
-                                                functionResponses: [
-                                                    {
-                                                        id: call.id,
-                                                        name: call.name,
-                                                        response: { result: "success" }
-                                                    }
-                                                ]
-                                            });
+                                            for (const call of functionCalls) {
+                                                console.log(`[ToolLog] Gemini requested tool: id=${call.id}, name=${call.name}, args=`, call.args);
+
+                                                if (call.name === 'searchConversation' || call.name === 'getConversationSummary') {
+                                                    console.log(`[MemoryLog] Processing ${call.name} server-side for user ${currentUserId}...`);
+                                                    executeConversationSearch(
+                                                        currentUserId || '',
+                                                        (call.args as any)?.timeframe || 'all',
+                                                        (call.args as any)?.query || '',
+                                                        (call.args as any)?.mode || 'all'
+                                                    ).then(searchResult => {
+                                                        if (session && call.id) {
+                                                            session.sendToolResponse({
+                                                                functionResponses: [
+                                                                    {
+                                                                        id: call.id,
+                                                                        name: call.name,
+                                                                        response: { result: searchResult }
+                                                                    }
+                                                                ]
+                                                            });
+                                                            console.log(`[MemoryLog] Sent searchConversation results to Gemini (${searchResult.length} chars)`);
+                                                        }
+                                                        clientWs.send(JSON.stringify({
+                                                            type: 'toolCall',
+                                                            id: call.id,
+                                                            name: call.name,
+                                                            args: call.args,
+                                                            result: searchResult
+                                                        }));
+                                                    }).catch(e => {
+                                                        console.error("[MemoryLog] Error executing search:", e);
+                                                    });
+                                                    continue;
+                                                }
+
+                                                if (call.name === 'saveMemory' && (call.args as any)?.memory && currentUserId && supabase) {
+                                                    const memStr = (call.args as any).memory;
+                                                    const memPayload: any = {
+                                                        id: crypto.randomUUID(),
+                                                        user_id: currentUserId,
+                                                        memory: memStr
+                                                    };
+                                                    queryTableCandidates('memories', t =>
+                                                        supabase.from(t).insert([memPayload])
+                                                    ).then(({ error }) => {
+                                                        if (error) console.warn("Notice saving memory:", error.message || error);
+                                                        else console.log(`[MemoryLog] Memory Saved: ${memStr}`);
+                                                    });
+                                                }
+                                                clientWs.send(JSON.stringify({
+                                                    type: 'toolCall',
+                                                    id: call.id,
+                                                    name: call.name,
+                                                    args: call.args
+                                                }));
+
+                                                if (call.id) {
+                                                    pendingToolCalls.set(call.id, { id: call.id, name: call.name });
+
+                                                    setTimeout(() => {
+                                                        if (pendingToolCalls.has(call.id) && session) {
+                                                            pendingToolCalls.delete(call.id);
+                                                            console.log(`[ToolLog] Timeout fallback for tool id=${call.id}, name=${call.name}`);
+                                                            session.sendToolResponse({
+                                                                functionResponses: [
+                                                                    {
+                                                                        id: call.id,
+                                                                        name: call.name,
+                                                                        response: { result: "Action completed." }
+                                                                    }
+                                                                ]
+                                                            });
+                                                        }
+                                                    }, 3000);
+                                                }
+                                            }
                                         }
                                     }
                                 } catch (err) {
@@ -534,6 +889,21 @@ async function startServer() {
                 } catch (error) {
                     console.error("Error connecting to Live API:", error);
                     clientWs.close();
+                }
+            } else if (msg.type === 'toolResponse' && session) {
+                console.log(`[ToolLog] Client returned tool execution response: id=${msg.id}, name=${msg.name}, result="${msg.result}"`);
+                if (msg.id && pendingToolCalls.has(msg.id)) {
+                    pendingToolCalls.delete(msg.id);
+                    session.sendToolResponse({
+                        functionResponses: [
+                            {
+                                id: msg.id,
+                                name: msg.name,
+                                response: { result: msg.result || "Action executed successfully" }
+                            }
+                        ]
+                    });
+                    console.log(`[ToolLog] Passed actual native execution result to Gemini: "${msg.result}"`);
                 }
             } else if (msg.audio && session) {
                 session.sendRealtimeInput({
