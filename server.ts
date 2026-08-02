@@ -927,17 +927,45 @@ async function startServer() {
 
 // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
-    // Behind a hosted/proxied preview (platform injects PORT/DEV_PORT), Vite's
-    // HMR client otherwise targets its own dev port (24678), which the
-    // single-origin proxy can't reach -> "WebSocket closed without opened".
-    // Sharing the existing HTTP server makes the client connect back through
-    // the same proxied origin (the app already tunnels a WS at /live), so HMR
-    // travels over the one working port.
+    // Behind a hosted/proxied preview (platform injects PORT/DEV_PORT), the
+    // single-origin proxy does not forward Vite's HMR WebSocket upgrade, so the
+    // injected `/@vite/client` keeps retrying and logs "WebSocket closed
+    // without opened" / "failed to connect to websocket". Setting `hmr: false`
+    // is not enough: Vite still injects the client script and it still opens a
+    // socket. In that environment we (a) disable HMR and (b) serve a harmless
+    // no-op for `/@vite/client` so no WebSocket is ever attempted. Local dev
+    // (no PORT/DEV_PORT) keeps full HMR.
     const isProxiedPreview = Boolean(process.env.PORT || process.env.DEV_PORT);
+
+    if (isProxiedPreview) {
+      // Stub the Vite HMR client with the same module exports it provides, but
+      // without any WebSocket/connection logic. This runs before the Vite
+      // middleware so the real client is never served.
+      app.get(["/@vite/client", "/@vite/client.js"], (_req, res) => {
+        res.type("application/javascript").send(
+          `// HMR disabled in proxied preview (v0). No WebSocket is opened.
+export const createHotContext = () => {
+  const noop = () => {};
+  const ctx = {
+    data: {},
+    accept: noop, acceptExports: noop, dispose: noop, prune: noop,
+    decline: noop, invalidate: noop, on: noop, off: noop, send: noop,
+  };
+  return ctx;
+};
+export const injectQuery = (url) => url;
+export const updateStyle = () => {};
+export const removeStyle = () => {};
+export class ErrorOverlay {}
+`,
+        );
+      });
+    }
+
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        hmr: isProxiedPreview ? { server } : true,
+        hmr: isProxiedPreview ? false : true,
       },
       appType: "spa",
     });
