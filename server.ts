@@ -927,10 +927,18 @@ async function startServer() {
 
 // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
-    // HMR behavior (including disabling it behind the hosted preview proxy) is
-    // configured centrally in vite.config.ts, which Vite merges in here.
+    // Behind a hosted/proxied preview (platform injects PORT/DEV_PORT), Vite's
+    // HMR client otherwise targets its own dev port (24678), which the
+    // single-origin proxy can't reach -> "WebSocket closed without opened".
+    // Sharing the existing HTTP server makes the client connect back through
+    // the same proxied origin (the app already tunnels a WS at /live), so HMR
+    // travels over the one working port.
+    const isProxiedPreview = Boolean(process.env.PORT || process.env.DEV_PORT);
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: isProxiedPreview ? { server } : true,
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
