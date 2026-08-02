@@ -927,6 +927,8 @@ async function startServer() {
 
 // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    // HMR behavior (including disabling it behind the hosted preview proxy) is
+    // configured centrally in vite.config.ts, which Vite merges in here.
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
