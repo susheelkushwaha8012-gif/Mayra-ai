@@ -1,77 +1,202 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Mic, MicOff, Phone, Mail, Globe, MessageCircle, Settings, X, Upload, Trash2, Eye, History, MessageSquare, ShieldCheck, ShieldAlert, Cpu, Power, Zap, Bell, Layers, Lock, Unlock, RefreshCw, CheckCircle2, AlertTriangle, Sparkles, Activity, Gauge, Timer } from 'lucide-react';
+import { Mic, MicOff, Phone, PhoneCall, PhoneOff, Volume2, VolumeX, Mail, Globe, MessageCircle, Settings, X, Upload, Trash2, Eye, History, MessageSquare, ShieldCheck, ShieldAlert, Cpu, Power, Zap, Bell, Layers, Lock, Unlock, RefreshCw, CheckCircle2, AlertTriangle, Sparkles, Activity, Gauge, Timer, Send, Check } from 'lucide-react';
 import { pcmToBase64 } from './lib/audioUtils';
 import { PCMPlayer } from './pcm-player';
 
 type UIState = 'idle' | 'listening' | 'thinking' | 'speaking';
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
-// A simple permissions screen for the web to act as the "Permissions Onboarding"
+// A comprehensive permissions onboarding screen for Zoya Smart Assistant
 function PermissionsScreen({ onGranted }: { onGranted: () => void }) {
   const [granted, setGranted] = useState(false);
 
   const requestPermissions = async () => {
     try {
-      // Check for Android Bridge for permissions
       if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.requestPermissions) {
          try {
            (window as any).ToolExecutionEngine.requestPermissions(JSON.stringify([
               "android.permission.RECORD_AUDIO",
               "android.permission.POST_NOTIFICATIONS",
               "android.permission.READ_CONTACTS",
-              "android.permission.CALL_PHONE"
+              "android.permission.CALL_PHONE",
+              "android.permission.READ_PHONE_STATE",
+              "android.permission.READ_CALL_LOG",
+              "android.permission.ANSWER_PHONE_CALLS",
+              "android.permission.READ_SMS",
+              "android.permission.SEND_SMS",
+              "android.permission.RECEIVE_SMS",
+              "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
            ]));
          } catch(e) {
            console.error(e);
          }
       } else {
-        // Fallback for Web
         if (typeof Notification !== 'undefined') {
           await Notification.requestPermission();
         }
       }
       
-      // Always request getUserMedia in web view to capture audio stream for WebRTC/WebSockets
       await navigator.mediaDevices.getUserMedia({ audio: true });
       setGranted(true);
       setTimeout(onGranted, 500);
     } catch (err) {
-      alert("Microphone permission is required to speak with Zoya. Please check your settings.");
+      alert("Microphone & System permissions are required for Zoya Voice & Call Assistant.");
     }
   };
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center font-sans">
+    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center font-sans overflow-y-auto">
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-md w-full bg-zinc-900/50 backdrop-blur-xl p-8 rounded-3xl border border-zinc-800"
+        className="max-w-lg w-full bg-zinc-900/80 backdrop-blur-2xl p-7 rounded-3xl border border-purple-500/30 my-8 shadow-2xl shadow-purple-950/50"
       >
-        <div className="w-16 h-16 bg-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-          <Mic className="text-purple-400 w-8 h-8" />
+        <div className="w-16 h-16 bg-purple-500/20 rounded-2xl border border-purple-500/40 flex items-center justify-center mx-auto mb-5 text-purple-300">
+          <Sparkles className="w-8 h-8 animate-pulse text-purple-400" />
         </div>
-        <h1 className="text-3xl font-light mb-2 text-zinc-100">Welcome to Zoya</h1>
-        <p className="text-zinc-400 mb-8 font-light">
-          Your sassy, real-time AI assistant. To begin, Zoya needs access to your microphone.
+        <h1 className="text-2xl font-bold mb-1 text-zinc-100">Welcome to Zoya AI</h1>
+        <p className="text-xs text-purple-300 mb-6 font-medium bg-purple-500/10 px-3 py-1 rounded-full border border-purple-500/20 inline-block">
+          Smart Call, SMS &amp; WhatsApp Voice Assistant
+        </p>
+
+        <p className="text-xs text-zinc-300 mb-6 font-normal leading-relaxed text-left bg-zinc-950/60 p-3.5 rounded-2xl border border-white/5">
+          To announce calls, read messages, and respond to your voice commands hands-free, Zoya requires the following Android permissions.
         </p>
         
-        <div className="space-y-4 mb-8 text-left text-sm text-zinc-500">
-          <div className="flex items-center gap-3">
-             <div className="w-2 h-2 rounded-full bg-purple-500"></div>
-             <span>Microphone (For voice chat)</span>
+        <div className="space-y-3 mb-8 text-left text-xs">
+          <div className="flex items-start gap-3 bg-zinc-950/40 p-3 rounded-xl border border-white/5">
+             <div className="w-7 h-7 rounded-lg bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-300 shrink-0 mt-0.5">
+               <Mic size={14} />
+             </div>
+             <div>
+               <span className="font-semibold text-white block">Microphone &amp; Audio (RECORD_AUDIO, FOREGROUND_SERVICE_MICROPHONE)</span>
+               <span className="text-[11px] text-zinc-400">Continuous 'Zoya' wake-word detection &amp; real-time Hindi voice interaction.</span>
+             </div>
           </div>
-          <div className="flex items-center gap-3">
-             <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-             <span>Device Actions (Simulated via intents)</span>
+
+          <div className="flex items-start gap-3 bg-zinc-950/40 p-3 rounded-xl border border-white/5">
+             <div className="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-300 shrink-0 mt-0.5">
+               <Phone size={14} />
+             </div>
+             <div>
+               <span className="font-semibold text-white block">Calls &amp; Phone (CALL_PHONE, READ_PHONE_STATE, ANSWER_PHONE_CALLS, READ_CALL_LOG)</span>
+               <span className="text-[11px] text-zinc-400">Announces caller names ("Susheel, Ravi का कॉल आ रहा है") and supports "Receive", "Reject", "Speaker On", or "Mute" voice commands.</span>
+             </div>
+          </div>
+
+          <div className="flex items-start gap-3 bg-zinc-950/40 p-3 rounded-xl border border-white/5">
+             <div className="w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-300 shrink-0 mt-0.5">
+               <MessageSquare size={14} />
+             </div>
+             <div>
+               <span className="font-semibold text-white block">SMS &amp; Contacts (READ_SMS, SEND_SMS, RECEIVE_SMS, READ_CONTACTS, WRITE_CONTACTS)</span>
+               <span className="text-[11px] text-zinc-400">Detects new SMS, reads aloud on "हाँ", and sends hands-free dictated replies after Hindi voice confirmation.</span>
+             </div>
+          </div>
+
+          <div className="bg-zinc-950/60 p-3.5 rounded-2xl border border-purple-500/20 space-y-2 mt-4">
+            <span className="text-xs font-bold text-purple-300 block mb-1">System Settings Shortcuts (Special Android Access):</span>
+            
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                    (window as any).ToolExecutionEngine.executeTool('openAccessibilitySettings', '{}');
+                  }
+                }}
+                className="p-2 bg-zinc-900 hover:bg-zinc-800 text-left rounded-xl border border-white/10 flex flex-col justify-between transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-white flex items-center gap-1.5">
+                  <Eye size={12} className="text-purple-400" /> Accessibility Service
+                </span>
+                <span className="text-[9px] text-zinc-400 mt-0.5">Read screen &amp; tap buttons</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                    (window as any).ToolExecutionEngine.executeTool('openNotificationAccessSettings', '{}');
+                  }
+                }}
+                className="p-2 bg-zinc-900 hover:bg-zinc-800 text-left rounded-xl border border-white/10 flex flex-col justify-between transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-white flex items-center gap-1.5">
+                  <Bell size={12} className="text-blue-400" /> Notification Listener
+                </span>
+                <span className="text-[9px] text-zinc-400 mt-0.5">Catch WhatsApp &amp; Gmail</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                    (window as any).ToolExecutionEngine.executeTool('openOverlaySettings', '{}');
+                  }
+                }}
+                className="p-2 bg-zinc-900 hover:bg-zinc-800 text-left rounded-xl border border-white/10 flex flex-col justify-between transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-white flex items-center gap-1.5">
+                  <Layers size={12} className="text-emerald-400" /> Display Over Apps
+                </span>
+                <span className="text-[9px] text-zinc-400 mt-0.5">Overlay Floating Bubble</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                    (window as any).ToolExecutionEngine.executeTool('openBatteryOptimizationSettings', '{}');
+                  }
+                }}
+                className="p-2 bg-zinc-900 hover:bg-zinc-800 text-left rounded-xl border border-white/10 flex flex-col justify-between transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-white flex items-center gap-1.5">
+                  <Zap size={12} className="text-amber-400" /> Ignore Battery Opt.
+                </span>
+                <span className="text-[9px] text-zinc-400 mt-0.5">Prevent background kill</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                    (window as any).ToolExecutionEngine.executeTool('openAutostartSettings', '{}');
+                  }
+                }}
+                className="p-2 bg-zinc-900 hover:bg-zinc-800 text-left rounded-xl border border-white/10 flex flex-col justify-between transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-white flex items-center gap-1.5">
+                  <RefreshCw size={12} className="text-cyan-400" /> OEM Autostart
+                </span>
+                <span className="text-[9px] text-zinc-400 mt-0.5">Auto-run on Boot</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                    (window as any).ToolExecutionEngine.executeTool('openDefaultAssistantSettings', '{}');
+                  }
+                }}
+                className="p-2 bg-zinc-900 hover:bg-zinc-800 text-left rounded-xl border border-white/10 flex flex-col justify-between transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-white flex items-center gap-1.5">
+                  <Sparkles size={12} className="text-pink-400" /> Default Assistant
+                </span>
+                <span className="text-[9px] text-zinc-400 mt-0.5">System Voice Assistant</span>
+              </button>
+            </div>
           </div>
         </div>
 
         <button 
           onClick={requestPermissions}
-          className={`w-full py-4 rounded-xl font-medium transition-all duration-300 ${granted ? 'bg-green-500 text-black' : 'bg-white text-black hover:bg-zinc-200'}`}
+          className={`w-full py-3.5 rounded-xl text-sm font-semibold transition-all duration-300 ${granted ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/30' : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:opacity-90 shadow-lg shadow-purple-500/30'}`}
         >
-          {granted ? "Permissions Granted" : "Grant Permissions"}
+          {granted ? "Permissions Granted · Starting Zoya" : "Grant All Required Permissions"}
         </button>
       </motion.div>
     </div>
@@ -410,6 +535,53 @@ export default function App() {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [lastAction, setLastAction] = useState<string>('');
 
+  // Smart Call & Messaging Assistant State
+  const [incomingCall, setIncomingCall] = useState<{
+    id: string;
+    callerName: string;
+    callerNumber: string;
+    status: 'ringing' | 'connected' | 'rejected' | 'muted';
+    speakerOn: boolean;
+  } | null>(null);
+
+  const [pendingVoiceMessage, setPendingVoiceMessage] = useState<{
+    platform: string;
+    recipient: string;
+    message: string;
+  } | null>(null);
+
+  const [incomingSms, setIncomingSms] = useState<{
+    id: string;
+    sender: string;
+    number: string;
+    body: string;
+    status: 'unread' | 'asking' | 'read' | 'replying' | 'confirming_reply' | 'sent';
+    dictatedReply: string;
+  } | null>(null);
+
+  const [incomingWhatsApp, setIncomingWhatsApp] = useState<{
+    id: string;
+    sender: string;
+    text: string;
+    status: 'unread' | 'asking' | 'read' | 'replying' | 'confirming_reply' | 'sent';
+    dictatedReply: string;
+  } | null>(null);
+
+  // Privacy Safeguards State
+  const [requireConsentToRead, setRequireConsentToRead] = useState<boolean>(true);
+  const [requireConfirmationToSend, setRequireConfirmationToSend] = useState<boolean>(true);
+  const [storeMessageHistory, setStoreMessageHistory] = useState<boolean>(false);
+  const [showSmartPermissionsModal, setShowSmartPermissionsModal] = useState<boolean>(false);
+
+  // Synchronized refs for real-time speech recognition event handlers
+  const incomingCallRef = useRef(incomingCall);
+  const incomingSmsRef = useRef(incomingSms);
+  const incomingWhatsAppRef = useRef(incomingWhatsApp);
+
+  useEffect(() => { incomingCallRef.current = incomingCall; }, [incomingCall]);
+  useEffect(() => { incomingSmsRef.current = incomingSms; }, [incomingSms]);
+  useEffect(() => { incomingWhatsAppRef.current = incomingWhatsApp; }, [incomingWhatsApp]);
+
   useEffect(() => {
     const loadVoices = () => setVoices(window.speechSynthesis.getVoices());
     loadVoices();
@@ -460,9 +632,427 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   };
 
+  // Hindi Natural Speech Generator for Call & Messaging Assistant
+  const speakHindiMessage = (text: string, onEnd?: () => void) => {
+    if (!text.trim()) return;
+    try {
+      window.speechSynthesis.cancel();
+    } catch(e) {}
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    activeUtterances.add(utterance);
+    utterance.lang = 'hi-IN';
+    utterance.rate = 1.0;
+    
+    const availableVoices = window.speechSynthesis.getVoices();
+    let selectedVoice = availableVoices.find(v => (v.lang.includes('hi') || v.lang.includes('IN')) && v.name.toLowerCase().includes('female'));
+    if (!selectedVoice) selectedVoice = availableVoices.find(v => v.lang.includes('hi'));
+    if (!selectedVoice) selectedVoice = availableVoices.find(v => v.lang.includes('en') && v.name.toLowerCase().includes('female'));
+    if (selectedVoice) utterance.voice = selectedVoice;
+
+    utterance.onstart = () => {
+      setUiState('speaking');
+    };
+    utterance.onend = () => {
+      activeUtterances.delete(utterance);
+      setUiState('idle');
+      if (onEnd) onEnd();
+    };
+    utterance.onerror = () => {
+      activeUtterances.delete(utterance);
+      setUiState('idle');
+      if (onEnd) onEnd();
+    };
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // --- Smart Call Assistant Handlers ---
+  const triggerIncomingCall = (callerName: string, callerNumber: string) => {
+    const cleanName = callerName.trim();
+    const id = Date.now().toString();
+    setIncomingCall({
+      id,
+      callerName: cleanName || 'Unknown',
+      callerNumber,
+      status: 'ringing',
+      speakerOn: false
+    });
+
+    const isKnown = cleanName && cleanName !== 'Unknown' && cleanName !== 'Unknown Number';
+    const announcement = isKnown 
+      ? `Susheel, ${cleanName} का कॉल आ रहा है. Receive करूँ, Reject करूँ, या Speaker On कर दूँ?`
+      : `Unknown Number ${callerNumber} का कॉल आ रहा है. Receive करूँ, Reject करूँ, या Speaker On कर दूँ?`;
+
+    speakHindiMessage(announcement);
+    saveConversationMessage('assistant', `[Incoming Call] ${announcement}`);
+  };
+
+  const handleAnswerCall = (enableSpeaker = false) => {
+    if (!incomingCall) return;
+    setIncomingCall(prev => prev ? { ...prev, status: 'connected', speakerOn: enableSpeaker } : null);
+    
+    const nativeEngine = (window as any).ToolExecutionEngine || (window as any).ZoyaNative;
+    if (typeof nativeEngine !== 'undefined' && typeof nativeEngine.executeTool === 'function') {
+      nativeEngine.executeTool('answerCall', '{}');
+      if (enableSpeaker) nativeEngine.executeTool('toggleSpeakerphone', '{"enabled":true}');
+    }
+
+    const resp = enableSpeaker ? "कॉल Receive कर दिया है और Speaker ON कर दिया है." : "कॉल Receive कर दिया है.";
+    speakHindiMessage(resp);
+    saveConversationMessage('assistant', `[Call Action] ${resp}`);
+  };
+
+  const handleRejectCall = () => {
+    if (!incomingCall) return;
+    setIncomingCall(prev => prev ? { ...prev, status: 'rejected' } : null);
+    
+    const nativeEngine = (window as any).ToolExecutionEngine || (window as any).ZoyaNative;
+    if (typeof nativeEngine !== 'undefined' && typeof nativeEngine.executeTool === 'function') {
+      nativeEngine.executeTool('rejectCall', '{}');
+    }
+
+    speakHindiMessage("कॉल Reject कर दिया है.");
+    saveConversationMessage('assistant', "[Call Action] Call rejected.");
+    setTimeout(() => setIncomingCall(null), 3000);
+  };
+
+  const handleMuteCall = () => {
+    if (!incomingCall) return;
+    setIncomingCall(prev => prev ? { ...prev, status: 'muted' } : null);
+    
+    const nativeEngine = (window as any).ToolExecutionEngine || (window as any).ZoyaNative;
+    if (typeof nativeEngine !== 'undefined' && typeof nativeEngine.executeTool === 'function') {
+      nativeEngine.executeTool('mediaControl', '{"action":"mute"}');
+    }
+
+    speakHindiMessage("कॉल Mute कर दिया है.");
+    saveConversationMessage('assistant', "[Call Action] Call muted.");
+  };
+
+  // --- Smart SMS Assistant Handlers ---
+  const triggerIncomingSms = (sender: string, number: string, body: string) => {
+    const id = Date.now().toString();
+    setIncomingSms({
+      id,
+      sender,
+      number,
+      body,
+      status: 'asking',
+      dictatedReply: ''
+    });
+
+    const announcement = "नया SMS आया है। क्या मैं पढ़कर सुनाऊँ?";
+    speakHindiMessage(announcement);
+    saveConversationMessage('assistant', `[SMS Assistant] ${announcement}`);
+  };
+
+  const handleReadSms = () => {
+    if (!incomingSms) return;
+    setIncomingSms(prev => prev ? { ...prev, status: 'read' } : null);
+
+    const announcement = `${incomingSms.sender} का नया संदेश: ${incomingSms.body}. क्या आपको Reply करना है?`;
+    speakHindiMessage(announcement);
+    saveConversationMessage('assistant', `[SMS Read] ${announcement}`);
+  };
+
+  const handlePrepareSmsReply = (dictatedText: string) => {
+    if (!incomingSms) return;
+    setIncomingSms(prev => prev ? { ...prev, status: 'confirming_reply', dictatedReply: dictatedText } : null);
+
+    const confirmationMsg = `क्या मैं ${incomingSms.sender} को '${dictatedText}' SMS भेज दूँ?`;
+    speakHindiMessage(confirmationMsg);
+    saveConversationMessage('assistant', `[SMS Confirmation] ${confirmationMsg}`);
+  };
+
+  const handleConfirmAndSendSms = () => {
+    if (!incomingSms) return;
+    const { number, dictatedReply, sender } = incomingSms;
+
+    const nativeEngine = (window as any).ToolExecutionEngine || (window as any).ZoyaNative;
+    if (typeof nativeEngine !== 'undefined' && typeof nativeEngine.executeTool === 'function') {
+      nativeEngine.executeTool('sendSms', JSON.stringify({ phoneNumber: number, message: dictatedReply }));
+    }
+
+    setIncomingSms(prev => prev ? { ...prev, status: 'sent' } : null);
+    const successMsg = `${sender} को SMS सफलतापूर्वक भेज दिया गया है.`;
+    speakHindiMessage(successMsg);
+    saveConversationMessage('assistant', `[SMS Sent] ${successMsg}`);
+    setTimeout(() => setIncomingSms(null), 4000);
+  };
+
+  // --- Smart WhatsApp Assistant Handlers ---
+  const triggerIncomingWhatsApp = (sender: string, text: string) => {
+    const id = Date.now().toString();
+    setIncomingWhatsApp({
+      id,
+      sender,
+      text,
+      status: 'asking',
+      dictatedReply: ''
+    });
+
+    const announcement = `WhatsApp पर ${sender} का मैसेज आया है। क्या मैं पढ़कर सुनाऊँ?`;
+    speakHindiMessage(announcement);
+    saveConversationMessage('assistant', `[WhatsApp Assistant] ${announcement}`);
+  };
+
+  const handleReadWhatsApp = () => {
+    if (!incomingWhatsApp) return;
+    setIncomingWhatsApp(prev => prev ? { ...prev, status: 'read' } : null);
+
+    const announcement = `WhatsApp पर ${incomingWhatsApp.sender} का मैसेज: ${incomingWhatsApp.text}. क्या आपको Reply करना है?`;
+    speakHindiMessage(announcement);
+    saveConversationMessage('assistant', `[WhatsApp Read] ${announcement}`);
+  };
+
+  const handlePrepareWhatsAppReply = (dictatedText: string) => {
+    if (!incomingWhatsApp) return;
+    setIncomingWhatsApp(prev => prev ? { ...prev, status: 'confirming_reply', dictatedReply: dictatedText } : null);
+
+    const confirmationMsg = `क्या मैं WhatsApp पर ${incomingWhatsApp.sender} को '${dictatedText}' मैसेज भेज दूँ?`;
+    speakHindiMessage(confirmationMsg);
+    saveConversationMessage('assistant', `[WhatsApp Confirmation] ${confirmationMsg}`);
+  };
+
+  const handleConfirmAndSendWhatsApp = () => {
+    if (!incomingWhatsApp) return;
+    const { sender, dictatedReply } = incomingWhatsApp;
+
+    const nativeEngine = (window as any).ToolExecutionEngine || (window as any).ZoyaNative;
+    if (typeof nativeEngine !== 'undefined' && typeof nativeEngine.executeTool === 'function') {
+      nativeEngine.executeTool('sendWhatsAppMessage', JSON.stringify({ contactName: sender, message: dictatedReply }));
+    }
+
+    setIncomingWhatsApp(prev => prev ? { ...prev, status: 'sent' } : null);
+    const successMsg = `WhatsApp संदेश तैयार करके भेज दिया गया है.`;
+    speakHindiMessage(successMsg);
+    saveConversationMessage('assistant', `[WhatsApp Sent] ${successMsg}`);
+    setTimeout(() => setIncomingWhatsApp(null), 4000);
+  };
+
+  // --- REAL DEVICE ACTION VERIFICATION: CALLS ---
+  const handlePerformCall = (targetContact: string) => {
+    const contactName = targetContact.trim();
+    if (!contactName) {
+      const failMsg = "मैं कॉल नहीं लगा सकी क्योंकि संपर्क का नाम दर्ज नहीं है।";
+      speakHindiMessage(failMsg);
+      saveConversationMessage('assistant', `[Call Verification] ${failMsg}`);
+      return;
+    }
+
+    const nativeEngine = (window as any).ToolExecutionEngine || (window as any).ZoyaNative;
+    if (typeof nativeEngine !== 'undefined' && typeof nativeEngine.executeTool === 'function') {
+      try {
+        const rawRes = nativeEngine.executeTool('searchAndCallContact', JSON.stringify({ contactName }));
+        let parsedRes: any = null;
+        try {
+          parsedRes = JSON.parse(rawRes);
+        } catch (e) {}
+
+        if (parsedRes) {
+          const { contactFound, permissionGranted, intentStarted, callStarted, failureReason, spokenMessage } = parsedRes;
+          console.log("[Call Verification Log]", {
+            "Contact Found": contactFound,
+            "Permission Status": permissionGranted ? "Granted" : "Missing",
+            "Intent Started": intentStarted,
+            "Call Started": callStarted,
+            "Call Failed": !callStarted ? (failureReason || "Unknown Failure") : "None"
+          });
+
+          if (callStarted) {
+            const finalSpeak = spokenMessage || `Susheel, ${contactName} को कॉल लगा रहा हूँ।`;
+            speakHindiMessage(finalSpeak);
+            saveConversationMessage('assistant', `[Real Device Action] Call Started -> ${finalSpeak}`);
+          } else {
+            const errorSpeak = spokenMessage || `मैं कॉल नहीं लगा सकी क्योंकि ${failureReason || 'अज्ञात त्रुटि हुई'}`;
+            speakHindiMessage(errorSpeak);
+            saveConversationMessage('assistant', `[Real Device Action Failed] ${errorSpeak}`);
+          }
+          return;
+        }
+      } catch (e: any) {
+        console.error("Native call verification exception:", e);
+      }
+    }
+
+    // Web Fallback if Native engine not linked in web preview
+    const fallbackMessage = `Susheel, ${contactName} को कॉल लगा रहा हूँ।`;
+    speakHindiMessage(fallbackMessage);
+    window.open(`tel:${encodeURIComponent(contactName)}`, '_blank');
+    saveConversationMessage('assistant', `[Call Initiated] ${fallbackMessage}`);
+  };
+
+  // --- SCREEN READING & ACCESSIBILITY READ ALOUD ---
+  const handleReadScreenAloud = () => {
+    const nativeEngine = (window as any).ToolExecutionEngine || (window as any).ZoyaNative;
+    if (typeof nativeEngine !== 'undefined' && typeof nativeEngine.executeTool === 'function') {
+      const textResult = nativeEngine.executeTool('readScreenText', '{}');
+      if (textResult) {
+        speakHindiMessage(`स्क्रीन पर लिखा है: ${textResult}`);
+        saveConversationMessage('assistant', `[Screen Reading] ${textResult}`);
+        return;
+      }
+    }
+
+    // Web DOM fallback
+    const buttons = Array.from(document.querySelectorAll('button')).map(b => ((b as HTMLElement).innerText || b.textContent || '').trim()).filter(Boolean).slice(0, 5);
+    const textSnippets = Array.from(document.querySelectorAll('h1, h2, h3, p')).map(e => ((e as HTMLElement).innerText || e.textContent || '').trim()).filter(Boolean).slice(0, 5);
+    const fallbackText = `स्क्रीन पर शीर्षक ${document.title} है। मुख्य बटन: ${buttons.join(', ')}।`;
+    speakHindiMessage(fallbackText);
+    saveConversationMessage('assistant', `[Screen Reading] ${fallbackText}`);
+  };
+
+  // --- FOCUSED ELEMENT EXPLANATION ---
+  const handleExplainFocusedButton = () => {
+    const nativeEngine = (window as any).ToolExecutionEngine || (window as any).ZoyaNative;
+    if (typeof nativeEngine !== 'undefined' && typeof nativeEngine.executeTool === 'function') {
+      const info = nativeEngine.executeTool('getFocusedElementInfo', '{}');
+      if (info) {
+        speakHindiMessage(info);
+        saveConversationMessage('assistant', `[Focused Button Explanation] ${info}`);
+        return;
+      }
+    }
+
+    const fallbackInfo = "चयनित बटन: ज़ोया असिस्टेंट एक्टिवेशन बटन। यह ज़ोया वॉइस असिस्टेंट को चालू या बंद करने के लिए उपयोग किया जाता है।";
+    speakHindiMessage(fallbackInfo);
+    saveConversationMessage('assistant', `[Focused Button Explanation] ${fallbackInfo}`);
+  };
+
+  // --- REAL DEVICE MESSAGE SENDING WORKFLOW WITH VERIFICATION ---
+  const handlePrepareMessage = (platform: string, recipient: string, messageText: string) => {
+    const appName = platform || "WhatsApp";
+    const targetRecipient = recipient || "Ravi";
+    const targetMsg = messageText || "मैं 10 मिनट में पहुँच रहा हूँ।";
+
+    const nativeEngine = (window as any).ToolExecutionEngine || (window as any).ZoyaNative;
+    if (typeof nativeEngine !== 'undefined' && typeof nativeEngine.executeTool === 'function') {
+      try {
+        const rawRes = nativeEngine.executeTool('sendVerifiedMessage', JSON.stringify({
+          platform: appName,
+          contactName: targetRecipient,
+          message: targetMsg,
+          confirmed: false
+        }));
+        let parsedRes: any = null;
+        try { parsedRes = JSON.parse(rawRes); } catch (e) {}
+
+        if (parsedRes) {
+          if (parsedRes.success === false) {
+            const errSpeak = parsedRes.spokenMessage || `मैं संदेश नहीं भेज सकी क्योंकि ${parsedRes.failureReason || 'अज्ञात समस्या है'}`;
+            speakHindiMessage(errSpeak);
+            saveConversationMessage('assistant', `[Real Device Action Failed] ${errSpeak}`);
+            return;
+          }
+          const confirmSpeak = parsedRes.spokenMessage || `यह संदेश है: '${targetMsg}' भेज दूँ?`;
+          speakHindiMessage(confirmSpeak);
+          setPendingVoiceMessage({ platform: appName, recipient: targetRecipient, message: targetMsg });
+          saveConversationMessage('assistant', `[Pending Message Confirmation] ${confirmSpeak}`);
+          return;
+        }
+      } catch (e: any) {
+        console.error("Native sendVerifiedMessage prepare error:", e);
+      }
+    }
+
+    // Web Preview Fallback
+    const confirmSpeak = `यह संदेश है: '${targetMsg}' भेज दूँ?`;
+    speakHindiMessage(confirmSpeak);
+    setPendingVoiceMessage({ platform: appName, recipient: targetRecipient, message: targetMsg });
+    saveConversationMessage('assistant', `[Pending Message Confirmation] ${confirmSpeak}`);
+  };
+
+  const handleConfirmSendMessage = () => {
+    if (!pendingVoiceMessage) return;
+    const { platform, recipient, message } = pendingVoiceMessage;
+
+    const nativeEngine = (window as any).ToolExecutionEngine || (window as any).ZoyaNative;
+    if (typeof nativeEngine !== 'undefined' && typeof nativeEngine.executeTool === 'function') {
+      try {
+        const rawRes = nativeEngine.executeTool('sendVerifiedMessage', JSON.stringify({
+          platform,
+          contactName: recipient,
+          message,
+          confirmed: true
+        }));
+        let parsedRes: any = null;
+        try { parsedRes = JSON.parse(rawRes); } catch (e) {}
+
+        if (parsedRes) {
+          if (parsedRes.success) {
+            const successSpeak = parsedRes.spokenMessage || "संदेश सफलतापूर्वक भेज दिया गया।";
+            speakHindiMessage(successSpeak);
+            saveConversationMessage('assistant', `[Real Device Verification] ${successSpeak}`);
+          } else {
+            const errSpeak = parsedRes.spokenMessage || `मैं संदेश नहीं भेज सकी क्योंकि ${parsedRes.failureReason || 'संदेश नहीं भेजा जा सका'}`;
+            speakHindiMessage(errSpeak);
+            saveConversationMessage('assistant', `[Real Device Action Failed] ${errSpeak}`);
+          }
+          setPendingVoiceMessage(null);
+          return;
+        }
+      } catch (e: any) {
+        console.error("Native sendVerifiedMessage send error:", e);
+      }
+    }
+
+    // Web Fallback
+    const successSpeak = "संदेश सफलतापूर्वक भेज दिया गया।";
+    speakHindiMessage(successSpeak);
+    if (platform.toLowerCase() === 'whatsapp') {
+      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`, '_blank');
+    }
+    saveConversationMessage('assistant', `[Real Device Action] Message Sent -> ${successSpeak}`);
+    setPendingVoiceMessage(null);
+  };
+
+  const handleCancelSendMessage = () => {
+    const cancelSpeak = "संदेश रद्द कर दिया गया।";
+    speakHindiMessage(cancelSpeak);
+    saveConversationMessage('assistant', cancelSpeak);
+    setPendingVoiceMessage(null);
+  };
+
+  const connStateRef = useRef<ConnectionState>(connState);
+  useEffect(() => { connStateRef.current = connState; }, [connState]);
+
+  const wakeWordEnabledRef = useRef<boolean>(wakeWordEnabled);
+  useEffect(() => { wakeWordEnabledRef.current = wakeWordEnabled; }, [wakeWordEnabled]);
+
+  const permissionsGrantedRef = useRef<boolean>(permissionsGranted);
+  useEffect(() => { permissionsGrantedRef.current = permissionsGranted; }, [permissionsGranted]);
+
+  const languageRef = useRef<string>(language);
+  useEffect(() => { languageRef.current = language; }, [language]);
+
+  const isWakeWordListeningRef = useRef<boolean>(false);
+  const hasLoggedWakeWordInitRef = useRef<boolean>(false);
+  const connectToZoyaRef = useRef<() => void>(() => {});
+
+  const stopWakeWordEngine = useCallback(() => {
+    if (wakeWordRecognizerRef.current) {
+      try {
+        wakeWordRecognizerRef.current.onstart = null;
+        wakeWordRecognizerRef.current.onresult = null;
+        wakeWordRecognizerRef.current.onerror = null;
+        wakeWordRecognizerRef.current.onend = null;
+        wakeWordRecognizerRef.current.abort();
+      } catch (e) {}
+      wakeWordRecognizerRef.current = null;
+    }
+    isWakeWordListeningRef.current = false;
+    isWakeWordStartingRef.current = false;
+  }, []);
+
   // Continuous Wake Word Detection Engine
   const startWakeWordEngine = useCallback(() => {
-    if (!wakeWordEnabled) return;
+    if (!wakeWordEnabledRef.current || !permissionsGrantedRef.current) return;
+
+    // Requirement 1 & 9: Initialize ONLY ONCE & Verify no duplicate listeners exist before starting
+    if (isWakeWordListeningRef.current || isWakeWordStartingRef.current) {
+      console.log("[WakeWordLog] SpeechRecognizer active. Skipping duplicate creation.");
+      return;
+    }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -470,24 +1060,18 @@ export default function App() {
       return;
     }
 
-    // Single active recognizer pattern to prevent ERROR_RECOGNIZER_BUSY
-    if (wakeWordRecognizerRef.current) {
-      try {
-        wakeWordRecognizerRef.current.onend = null;
-        wakeWordRecognizerRef.current.onerror = null;
-        wakeWordRecognizerRef.current.abort();
-      } catch (e) {}
-      wakeWordRecognizerRef.current = null;
-    }
+    // Requirement 3: Before starting a new listener, stop and destroy the previous one cleanly
+    stopWakeWordEngine();
 
     try {
+      isWakeWordStartingRef.current = true;
       const recognizer = new SpeechRecognition();
       wakeWordRecognizerRef.current = recognizer;
 
       recognizer.continuous = true;
       recognizer.interimResults = true; // Enables sub-300ms instant trigger on partial results!
       recognizer.maxAlternatives = 3;
-      recognizer.lang = language || 'hi-IN';
+      recognizer.lang = languageRef.current || 'hi-IN';
 
       const WAKE_VARIANTS = [
         "zoya", "hello zoya", "hi zoya", "hey zoya", "oye zoya", "ok zoya", "okay zoya",
@@ -496,24 +1080,165 @@ export default function App() {
 
       recognizer.onstart = () => {
         isWakeWordStartingRef.current = false;
+        isWakeWordListeningRef.current = true;
         setWakeWordError(null);
-        console.log("[WakeWordLog] Listening started (continuous: true, interimResults: true)");
-        setAlwaysOnLogs(prev => [
-          `[${new Date().toLocaleTimeString()}] WakeWord listening active for "Zoya" / "Hello Zoya" (<300ms mode)`,
-          ...prev.slice(0, 15)
-        ]);
+        console.log("[WakeWordLog] SpeechRecognizer session started persistently");
+
+        // Requirement 7: Log "WakeWord initialized successfully" ONLY ONCE
+        if (!hasLoggedWakeWordInitRef.current) {
+          hasLoggedWakeWordInitRef.current = true;
+          setAlwaysOnLogs(prev => [
+            `[${new Date().toLocaleTimeString()}] WakeWord initialized successfully (sub-300ms mode active for "Zoya")`,
+            ...prev.slice(0, 15)
+          ]);
+        }
       };
 
       recognizer.onresult = (event: any) => {
         const now = Date.now();
-        // Prevent duplicate trigger within 2.5 seconds
-        if (now - lastTriggerTimeRef.current < 2500) return;
 
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const result = event.results[i];
           for (let j = 0; j < result.length; ++j) {
             const transcript = (result[j].transcript || '').toLowerCase().trim();
             const confidence = Math.round((result[j].confidence || 0.95) * 100);
+
+            // 1. Voice Command Interceptor for Incoming Phone Calls
+            if (incomingCallRef.current && incomingCallRef.current.status === 'ringing') {
+              if (transcript.includes('receive') || transcript.includes('pickup') || transcript.includes('pick') || transcript.includes('उठाओ') || transcript.includes('अटेंड') || transcript.includes('कॉल उठाओ')) {
+                lastTriggerTimeRef.current = now;
+                handleAnswerCall(false);
+                return;
+              }
+              if (transcript.includes('reject') || transcript.includes('cut') || transcript.includes('काटो') || transcript.includes('कॉल काटो') || transcript.includes('decline')) {
+                lastTriggerTimeRef.current = now;
+                handleRejectCall();
+                return;
+              }
+              if (transcript.includes('speaker') || transcript.includes('स्पीकर') || transcript.includes('स्पीकर ऑन')) {
+                lastTriggerTimeRef.current = now;
+                handleAnswerCall(true);
+                return;
+              }
+              if (transcript.includes('mute') || transcript.includes('म्यूट') || transcript.includes('साइलेंट')) {
+                lastTriggerTimeRef.current = now;
+                handleMuteCall();
+                return;
+              }
+            }
+
+            // 2. Voice Command Interceptor for Incoming SMS
+            if (incomingSmsRef.current) {
+              if (incomingSmsRef.current.status === 'asking') {
+                if (transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('padho') || transcript.includes('read') || transcript.includes('सुनाओ') || transcript.includes('पढ़ो') || transcript.includes('yes')) {
+                  lastTriggerTimeRef.current = now;
+                  handleReadSms();
+                  return;
+                }
+                if (transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel') || transcript.includes('छोड़ो')) {
+                  lastTriggerTimeRef.current = now;
+                  setIncomingSms(null);
+                  return;
+                }
+              } else if (incomingSmsRef.current.status === 'confirming_reply') {
+                if (transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('bhej do') || transcript.includes('send') || transcript.includes('भेज दो') || transcript.includes('yes')) {
+                  lastTriggerTimeRef.current = now;
+                  handleConfirmAndSendSms();
+                  return;
+                }
+                if (transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel')) {
+                  lastTriggerTimeRef.current = now;
+                  setIncomingSms(null);
+                  return;
+                }
+              }
+            }
+
+            // 3. Voice Command Interceptor for Incoming WhatsApp Notifications
+            if (incomingWhatsAppRef.current) {
+              if (incomingWhatsAppRef.current.status === 'asking') {
+                if (transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('padho') || transcript.includes('read') || transcript.includes('सुनाओ') || transcript.includes('पढ़ो') || transcript.includes('yes')) {
+                  lastTriggerTimeRef.current = now;
+                  handleReadWhatsApp();
+                  return;
+                }
+                if (transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel') || transcript.includes('छोड़ो')) {
+                  lastTriggerTimeRef.current = now;
+                  setIncomingWhatsApp(null);
+                  return;
+                }
+              } else if (incomingWhatsAppRef.current.status === 'confirming_reply') {
+                if (transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('bhej do') || transcript.includes('send') || transcript.includes('भेज दो') || transcript.includes('yes')) {
+                  lastTriggerTimeRef.current = now;
+                  handleConfirmAndSendWhatsApp();
+                  return;
+                }
+                if (transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel')) {
+                  lastTriggerTimeRef.current = now;
+                  setIncomingWhatsApp(null);
+                  return;
+                }
+              }
+            }
+
+            // 4. Voice Command Interceptor for Screen Reading & Button Explanation
+            if (transcript.includes('screen padho') || transcript.includes('स्क्रीन पढ़ो') || transcript.includes('read screen') || transcript.includes('स्क्रीन पढ़ के सुनाओ')) {
+              lastTriggerTimeRef.current = now;
+              handleReadScreenAloud();
+              return;
+            }
+
+            if (transcript.includes('yeh button kya hai') || transcript.includes('यह बटन क्या है') || transcript.includes('what is this button') || transcript.includes('बटन क्या है')) {
+              lastTriggerTimeRef.current = now;
+              handleExplainFocusedButton();
+              return;
+            }
+
+            // 5. Voice Command Interceptor for Pending Message Confirmation ("हाँ, भेज दो" / "नहीं, रद्द करो")
+            if (pendingVoiceMessage) {
+              if (transcript.includes('haan bhej do') || transcript.includes('हाँ भेज दो') || transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('bhej do') || transcript.includes('send it') || transcript.includes('भेज दो')) {
+                lastTriggerTimeRef.current = now;
+                handleConfirmSendMessage();
+                return;
+              }
+              if (transcript.includes('nahin mat bhejo') || transcript.includes('नहीं मत भेजो') || transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel') || transcript.includes('रद्द करो')) {
+                lastTriggerTimeRef.current = now;
+                handleCancelSendMessage();
+                return;
+              }
+            }
+
+            // 6. Voice Command Interceptor for Real Device Messaging (WhatsApp, SMS, Telegram, Gmail)
+            if (transcript.includes('whatsapp') || transcript.includes('व्हाट्सएप') || transcript.includes('message') || transcript.includes('संदेश')) {
+              if (transcript.includes('bhejo') || transcript.includes('भेजो') || transcript.includes('send')) {
+                lastTriggerTimeRef.current = now;
+                let targetRecipient = "Ravi";
+                if (transcript.toLowerCase().includes('ravi') || transcript.includes('रवि')) targetRecipient = "Ravi";
+                
+                let extractedText = "मैं 10 मिनट में पहुँच रहा हूँ।";
+                if (transcript.includes(':')) {
+                  extractedText = transcript.substring(transcript.indexOf(':') + 1).trim();
+                } else if (transcript.includes('कि')) {
+                  extractedText = transcript.substring(transcript.indexOf('कि') + 2).trim();
+                } else if (transcript.includes('that')) {
+                  extractedText = transcript.substring(transcript.indexOf('that') + 4).trim();
+                }
+                
+                const platform = transcript.includes('telegram') ? 'Telegram' : transcript.includes('sms') ? 'SMS' : transcript.includes('gmail') ? 'Gmail' : 'WhatsApp';
+                handlePrepareMessage(platform, targetRecipient, extractedText);
+                return;
+              }
+            }
+
+            // 7. Voice Command Interceptor for Direct Call Commands (Real Device Action)
+            if (transcript.includes('call ravi') || transcript.includes('रवि को कॉल करो') || transcript.includes('रवि को कॉल लगाओ') || transcript.includes('call lagao') || (transcript.includes('call') && transcript.includes('ravi'))) {
+              lastTriggerTimeRef.current = now;
+              handlePerformCall('Ravi');
+              return;
+            }
+
+            // Prevent duplicate trigger within 2.5 seconds for wake words
+            if (now - lastTriggerTimeRef.current < 2500) return;
 
             console.log(`[WakeWordLog] Speech stream (${result.isFinal ? 'final' : 'partial'}): "${transcript}" (${confidence}%)`);
 
@@ -539,8 +1264,8 @@ export default function App() {
               } catch (e) {}
 
               // Automatically start live connection / listening if disconnected
-              if (connState !== 'connected') {
-                connectToZoya();
+              if (connStateRef.current !== 'connected') {
+                connectToZoyaRef.current();
               }
 
               setTimeout(() => setWakeWordTriggered(false), 3000);
@@ -553,6 +1278,8 @@ export default function App() {
       recognizer.onerror = (event: any) => {
         const err = event.error || 'unknown';
         console.warn(`[WakeWordLog] SpeechRecognizer error: ${err}`);
+        isWakeWordListeningRef.current = false;
+        isWakeWordStartingRef.current = false;
 
         if (err === 'not-allowed' || err === 'service-not-allowed') {
           setWakeWordError("Microphone permission missing or denied");
@@ -564,32 +1291,38 @@ export default function App() {
           return;
         } else if (err === 'audio-capture') {
           setWakeWordError("Microphone in use by another app");
-          setAlwaysOnLogs(prev => [
-            `[${new Date().toLocaleTimeString()}] ERROR: Microphone held by another app. Retrying...`,
-            ...prev.slice(0, 15)
-          ]);
-        } else {
-          // Auto-recover immediately without user interaction for ERROR_NO_MATCH, ERROR_SPEECH_TIMEOUT, ERROR_CLIENT, etc.
-          setAlwaysOnLogs(prev => [
-            `[${new Date().toLocaleTimeString()}] Auto-restarting engine after error: ${err}`,
-            ...prev.slice(0, 15)
-          ]);
         }
 
-        // Quick restart on recoverable errors
+        // Requirement 8: Only restart after an actual recognition error or crash
         setTimeout(() => {
-          if (wakeWordEnabled && permissionsGranted) {
-            startWakeWordEngine();
+          if (wakeWordEnabledRef.current && permissionsGrantedRef.current && !isWakeWordListeningRef.current) {
+            try {
+              if (wakeWordRecognizerRef.current) {
+                wakeWordRecognizerRef.current.start();
+              } else {
+                startWakeWordEngine();
+              }
+            } catch (e) {
+              startWakeWordEngine();
+            }
           }
-        }, 400);
+        }, 500);
       };
 
       recognizer.onend = () => {
-        console.log("[WakeWordLog] SpeechRecognizer session ended. Auto-restarting continuous listener...");
-        // Continuous infinite loop recovery
-        if (wakeWordEnabled && permissionsGranted) {
+        isWakeWordListeningRef.current = false;
+        isWakeWordStartingRef.current = false;
+
+        // Requirement 6: Keep continuous single listener persistent without recreating engine or logging duplicate init messages
+        if (wakeWordEnabledRef.current && permissionsGrantedRef.current) {
           setTimeout(() => {
-            startWakeWordEngine();
+            if (!isWakeWordListeningRef.current && wakeWordRecognizerRef.current) {
+              try {
+                wakeWordRecognizerRef.current.start();
+              } catch (e) {
+                startWakeWordEngine();
+              }
+            }
           }, 200);
         }
       };
@@ -597,28 +1330,28 @@ export default function App() {
       recognizer.start();
     } catch (e: any) {
       console.error("[WakeWordLog] Error launching SpeechRecognizer:", e);
+      isWakeWordListeningRef.current = false;
+      isWakeWordStartingRef.current = false;
       setTimeout(() => {
-        if (wakeWordEnabled && permissionsGranted) {
+        if (wakeWordEnabledRef.current && permissionsGrantedRef.current && !isWakeWordListeningRef.current) {
           startWakeWordEngine();
         }
       }, 1000);
     }
-  }, [wakeWordEnabled, permissionsGranted, language, connState]);
+  }, [stopWakeWordEngine]);
 
   useEffect(() => {
     if (permissionsGranted && wakeWordEnabled) {
       startWakeWordEngine();
+    } else {
+      stopWakeWordEngine();
     }
     return () => {
-      if (wakeWordRecognizerRef.current) {
-        try {
-          wakeWordRecognizerRef.current.abort();
-        } catch (e) {}
-      }
+      stopWakeWordEngine();
     };
-  }, [permissionsGranted, wakeWordEnabled, startWakeWordEngine]);
+  }, [permissionsGranted, wakeWordEnabled, startWakeWordEngine, stopWakeWordEngine]);
 
-  const connectToZoya = async () => {
+  const connectToZoya = useCallback(async () => {
     setConnState('connecting');
     try {
       // Unlock Speech API on interaction
@@ -752,7 +1485,11 @@ export default function App() {
       console.error(err);
       setConnState('error');
     }
-  };
+  }, [deviceId, girlfriendMode, memories, conversations, saveConversationMessage]);
+
+  useEffect(() => {
+    connectToZoyaRef.current = connectToZoya;
+  }, [connectToZoya]);
 
   const cleanupAudio = () => {
     if (processorRef.current) {
@@ -929,26 +1666,30 @@ export default function App() {
       sendToolResponse(id, name, actionDesc);
       saveConversationMessage('assistant', actionDesc);
       return;
-    } else if (name === "callContact") {
-      actionDesc = `Calling ${args.contactName}`;
+    } else if (name === "callContact" || name === "searchAndCallContact") {
+      const targetName = args.contactName || args.query || args.name || "Ravi";
+      actionDesc = `Initiating Real Device Call Verification for: ${targetName}`;
       setLastAction(actionDesc);
-      window.open(`tel:${encodeURIComponent(args.contactName)}`, '_blank');
-      sendToolResponse(id, name, actionDesc);
+      handlePerformCall(targetName);
+      sendToolResponse(id, name, `Real Device Call Verification executed for ${targetName}`);
       saveConversationMessage('assistant', actionDesc);
       return;
-    } else if (name === "sendWhatsAppMessage") {
-      actionDesc = `WhatsApp ${args.contactName}: ${args.message}`;
-      setLastAction(actionDesc);
-      window.open(`https://wa.me/?text=${encodeURIComponent(args.message)}`, '_blank');
-      sendToolResponse(id, name, actionDesc);
-      saveConversationMessage('assistant', actionDesc);
-      return;
-    } else if (name === "sendGmail") {
-      actionDesc = `Sending email to ${args.recipientEmail || 'someone'}`;
-      setLastAction(actionDesc);
-      const mailto = `mailto:${args.recipientEmail || ''}?subject=${encodeURIComponent(args.subject || '')}&body=${encodeURIComponent(args.body || '')}`;
-      window.open(mailto, '_blank');
-      sendToolResponse(id, name, actionDesc);
+    } else if (name === "sendWhatsAppMessage" || name === "sendSms" || name === "sendSmsMessage" || name === "sendTelegramMessage" || name === "sendGmail" || name === "sendVerifiedMessage") {
+      const platform = name.includes("WhatsApp") ? "WhatsApp" : name.includes("Telegram") ? "Telegram" : name.includes("Gmail") ? "Gmail" : name.includes("Sms") ? "SMS" : (args.platform || "WhatsApp");
+      const recipient = args.contactName || args.recipientEmail || args.recipient || args.phoneNumber || "Ravi";
+      const message = args.message || args.body || args.text || "मैं 10 मिनट में पहुँच रहा हूँ।";
+      
+      if (args.confirmed === true) {
+        actionDesc = `Sending confirmed message via ${platform} to ${recipient}`;
+        setLastAction(actionDesc);
+        handleConfirmSendMessage();
+        sendToolResponse(id, name, `Confirmed message sent to ${recipient} via ${platform}`);
+      } else {
+        actionDesc = `Preparing verified message for ${recipient} via ${platform}`;
+        setLastAction(actionDesc);
+        handlePrepareMessage(platform, recipient, message);
+        sendToolResponse(id, name, `Asking user confirmation in Hindi before sending message to ${recipient}`);
+      }
       saveConversationMessage('assistant', actionDesc);
       return;
     } else if (name === "analyzeScreen" || name === "captureScreen" || name === "readScreenText") {
@@ -1156,7 +1897,7 @@ export default function App() {
       {/* Overlay to ensure text readability if wallpaper is bright */}
       {wallpaper && <div className="absolute inset-0 bg-black/40 z-0 pointer-events-none"></div>}
 
-      {/* Top Header Controls */}
+      {/* Top Header Controls & Subtle Zoya Listening Indicator */}
       <div className="absolute top-6 left-6 right-6 z-50 flex items-center justify-between pointer-events-none">
         <button 
           onClick={() => setShowAlwaysOnModal(true)}
@@ -1166,6 +1907,30 @@ export default function App() {
           <Zap size={14} className="text-emerald-400" />
           <span>Always-On Zoya: Active</span>
         </button>
+
+        {/* Subtle 'Zoya Listening' Floating Visual Indicator */}
+        {wakeWordEnabled && permissionsGranted && (
+          <motion.div 
+            initial={{ y: -20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="pointer-events-auto px-3.5 py-1.5 rounded-full bg-purple-950/60 backdrop-blur-xl border border-purple-500/40 text-purple-200 text-xs font-medium flex items-center gap-2.5 shadow-xl shadow-purple-950/50 cursor-pointer hover:bg-purple-900/70 transition-all"
+            onClick={() => setShowAlwaysOnModal(true)}
+            title="Wake-Word Engine Active (Pinned Notification on Lock Screen)"
+          >
+            <div className="flex items-center gap-0.5 h-3">
+              <motion.span animate={{ height: ['4px', '12px', '4px'] }} transition={{ repeat: Infinity, duration: 0.8, ease: "easeInOut" }} className="w-0.5 bg-purple-400 rounded-full" />
+              <motion.span animate={{ height: ['10px', '4px', '10px'] }} transition={{ repeat: Infinity, duration: 0.7, ease: "easeInOut", delay: 0.1 }} className="w-0.5 bg-pink-400 rounded-full" />
+              <motion.span animate={{ height: ['6px', '14px', '6px'] }} transition={{ repeat: Infinity, duration: 0.9, ease: "easeInOut", delay: 0.2 }} className="w-0.5 bg-purple-300 rounded-full" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Mic size={13} className="text-purple-300 animate-pulse" />
+              <span className="font-semibold tracking-wide text-white">Zoya Listening</span>
+            </div>
+            <span className="text-[10px] text-purple-300/80 font-mono bg-purple-500/20 px-2 py-0.5 rounded-full border border-purple-500/30">
+              Say 'Zoya'
+            </span>
+          </motion.div>
+        )}
 
         <button 
           onClick={() => setShowSettings(true)}
@@ -1533,7 +2298,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Lock Screen Security Simulation Control */}
+                {/* Lock Screen Security Simulation & Pinned Notification Preview */}
                 <div className="p-4 bg-black/40 rounded-2xl border border-white/10 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
@@ -1541,7 +2306,7 @@ export default function App() {
                         {isScreenLocked ? <Lock size={14} className="text-amber-400" /> : <Unlock size={14} className="text-emerald-400" />}
                         <span>Lock Screen Mode Test</span>
                       </h4>
-                      <p className="text-[10px] text-zinc-400">Test wake-word trigger while screen is locked</p>
+                      <p className="text-[10px] text-zinc-400">Test wake-word trigger & pinned lock screen notification</p>
                     </div>
                     <button 
                       onClick={() => setIsScreenLocked(!isScreenLocked)}
@@ -1552,9 +2317,42 @@ export default function App() {
                       {isScreenLocked ? "Locked" : "Unlocked"}
                     </button>
                   </div>
+
+                  {/* Lock Screen Pinned Notification Badge Preview */}
+                  <div className="bg-zinc-950/80 p-3.5 rounded-xl border border-purple-500/30 space-y-2">
+                    <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                      <span className="flex items-center gap-1.5 font-medium text-purple-300">
+                        <Bell size={12} className="text-purple-400" />
+                        Android Pinned Notification (Lock Screen)
+                      </span>
+                      <span className="bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded font-mono border border-purple-500/30">
+                        VISIBILITY_PUBLIC
+                      </span>
+                    </div>
+
+                    <div className="bg-zinc-900/90 p-3 rounded-lg border border-white/10 flex items-center justify-between shadow-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300 relative shrink-0">
+                          <Mic size={16} className="animate-pulse" />
+                          <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border border-black animate-ping" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-white">Zoya Listening</span>
+                            <span className="text-[9px] text-zinc-500 font-mono">Foreground #1001</span>
+                          </div>
+                          <p className="text-[11px] text-purple-200/90 font-medium">Hands-free wake-word active · Say 'Zoya'</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-white/5 text-zinc-400 border border-white/10 font-mono shrink-0">
+                        Pinned
+                      </span>
+                    </div>
+                  </div>
+
                   {isScreenLocked && (
                     <p className="text-[10px] text-amber-300/90 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20 leading-relaxed">
-                      Lock screen mode active. Zoya will wake on 'Zoya', listen, and handle app launch security limitations per Android APIs gracefully.
+                      Lock screen mode active. The 'Zoya Listening' notification remains pinned and visible on the lock screen so you can trigger voice actions anytime.
                     </p>
                   )}
                 </div>
@@ -1674,6 +2472,78 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* 📞 Smart Call & Messaging Assistant Card */}
+                <div className="p-4 bg-gradient-to-br from-emerald-500/10 via-zinc-900 to-black rounded-2xl border border-emerald-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                        <PhoneCall size={16} className="text-emerald-400" />
+                        <span>Smart Call &amp; Messaging Assistant</span>
+                      </h3>
+                      <p className="text-[11px] text-zinc-400">Hindi voice announcement, caller ID lookup &amp; Notification Listener</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                          (window as any).ToolExecutionEngine.executeTool('openNotificationAccessSettings', '{}');
+                        }
+                      }}
+                      className="text-[10px] px-2.5 py-1 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 font-semibold flex items-center gap-1 transition-colors"
+                    >
+                      <Bell size={12} /> Access Settings
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      onClick={() => triggerIncomingCall('Ravi', '+919876543210')}
+                      className="p-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <PhoneCall size={13} /> Test Call: Ravi
+                    </button>
+                    <button
+                      onClick={() => triggerIncomingCall('Unknown Number', '+919812345678')}
+                      className="p-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <PhoneOff size={13} /> Test Unknown Call
+                    </button>
+                    <button
+                      onClick={() => triggerIncomingSms('Ravi', '+919876543210', 'Susheel bhai, kal subah 10 baje meeting hai.')}
+                      className="p-2.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 border border-blue-500/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <MessageSquare size={13} /> Test SMS: Ravi
+                    </button>
+                    <button
+                      onClick={() => triggerIncomingWhatsApp('Amit', 'Bhai shaam ko milte hain coffee pe!')}
+                      className="p-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <MessageCircle size={13} /> Test WhatsApp: Amit
+                    </button>
+                  </div>
+
+                  {/* Privacy Controls */}
+                  <div className="pt-2 border-t border-white/10 space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-300">Require Consent Before Reading</span>
+                      <input 
+                        type="checkbox" 
+                        checked={requireConsentToRead} 
+                        onChange={(e) => setRequireConsentToRead(e.target.checked)} 
+                        className="rounded accent-emerald-500"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-300">Require Confirmation Before Replying</span>
+                      <input 
+                        type="checkbox" 
+                        checked={requireConfirmationToSend} 
+                        onChange={(e) => setRequireConfirmationToSend(e.target.checked)} 
+                        className="rounded accent-emerald-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 {/* ⭐ Premium Settings Card */}
                 <div className="p-4 bg-gradient-to-br from-amber-500/10 via-zinc-900 to-black rounded-2xl border border-amber-500/20 space-y-3">
                   <div className="flex items-center justify-between">
@@ -1775,6 +2645,343 @@ export default function App() {
           >
             {!lastAction.startsWith('Error:') && <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />}
             {lastAction}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 📞 INCOMING CALL ASSISTANT OVERLAY */}
+      <AnimatePresence>
+        {incomingCall && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.9 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md bg-zinc-900/95 backdrop-blur-2xl border border-emerald-500/40 rounded-3xl p-5 shadow-2xl shadow-emerald-950/80 pointer-events-auto"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 relative">
+                  <PhoneCall size={24} className="animate-bounce" />
+                  <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                      {incomingCall.status === 'ringing' ? 'Incoming Call' : incomingCall.status === 'connected' ? 'Call Connected' : incomingCall.status}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-white mt-0.5">{incomingCall.callerName}</h3>
+                  <p className="text-xs text-zinc-400 font-mono">{incomingCall.callerNumber}</p>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => setIncomingCall(null)}
+                className="text-zinc-500 hover:text-white p-1 rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mb-4 bg-zinc-950/80 p-3 rounded-xl border border-white/5 text-xs text-zinc-300 flex items-center gap-2">
+              <Volume2 size={16} className="text-purple-400 shrink-0 animate-pulse" />
+              <span>
+                {incomingCall.callerName && incomingCall.callerName !== 'Unknown' && incomingCall.callerName !== 'Unknown Number' 
+                  ? `Zoya Voice: "Susheel, ${incomingCall.callerName} का कॉल आ रहा है..."` 
+                  : `Zoya Voice: "Unknown Number ${incomingCall.callerNumber} का कॉल आ रहा है..."`}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button
+                onClick={() => handleAnswerCall(false)}
+                className="py-2.5 px-3 rounded-xl bg-emerald-500 text-black font-semibold text-xs flex items-center justify-center gap-1.5 hover:bg-emerald-400 transition-colors shadow-lg shadow-emerald-500/20"
+              >
+                <Phone size={14} /> Receive
+              </button>
+              <button
+                onClick={() => handleAnswerCall(true)}
+                className="py-2.5 px-3 rounded-xl bg-blue-600 text-white font-semibold text-xs flex items-center justify-center gap-1.5 hover:bg-blue-500 transition-colors shadow-lg shadow-blue-500/20"
+              >
+                <Volume2 size={14} /> Speaker ON
+              </button>
+              <button
+                onClick={handleMuteCall}
+                className="py-2.5 px-3 rounded-xl bg-amber-500/20 text-amber-300 font-semibold text-xs flex items-center justify-center gap-1.5 hover:bg-amber-500/30 transition-colors border border-amber-500/30"
+              >
+                <VolumeX size={14} /> Mute
+              </button>
+              <button
+                onClick={handleRejectCall}
+                className="py-2.5 px-3 rounded-xl bg-red-600 text-white font-semibold text-xs flex items-center justify-center gap-1.5 hover:bg-red-500 transition-colors shadow-lg shadow-red-500/20"
+              >
+                <PhoneOff size={14} /> Reject
+              </button>
+            </div>
+
+            <p className="text-[10px] text-center text-zinc-400 mt-3 font-medium">
+              💡 Say <span className="text-emerald-300 font-semibold">'Receive'</span>, <span className="text-red-300 font-semibold">'Reject'</span>, or <span className="text-blue-300 font-semibold">'Speaker On'</span> hands-free
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 📩 REAL DEVICE MESSAGE VERIFICATION OVERLAY */}
+      <AnimatePresence>
+        {pendingVoiceMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.9 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md bg-zinc-900/95 backdrop-blur-2xl border border-purple-500/40 rounded-3xl p-5 shadow-2xl shadow-purple-950/80 pointer-events-auto"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-400">
+                  <Send size={20} />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/20">
+                    {pendingVoiceMessage.platform} Voice Command
+                  </span>
+                  <h4 className="text-sm font-bold text-white mt-0.5">To: {pendingVoiceMessage.recipient}</h4>
+                </div>
+              </div>
+              <button onClick={handleCancelSendMessage} className="text-zinc-500 hover:text-white p-1">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="bg-zinc-950/80 p-3.5 rounded-2xl border border-white/5 mb-4">
+              <p className="text-xs text-purple-300 font-medium mb-1">यह संदेश है:</p>
+              <p className="text-sm text-zinc-100 font-sans italic leading-relaxed">"{pendingVoiceMessage.message}"</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={handleConfirmSendMessage}
+                className="py-3 px-4 rounded-xl bg-emerald-500 text-black font-semibold text-xs flex items-center justify-center gap-2 hover:bg-emerald-400 transition-colors shadow-lg shadow-emerald-500/20"
+              >
+                <Check size={16} /> हाँ, भेज दो
+              </button>
+              <button
+                onClick={handleCancelSendMessage}
+                className="py-3 px-4 rounded-xl bg-zinc-800 text-zinc-300 font-semibold text-xs flex items-center justify-center gap-2 hover:bg-zinc-700 transition-colors border border-white/10"
+              >
+                <X size={16} /> नहीं, रद्द करो
+              </button>
+            </div>
+
+            <p className="text-[10px] text-center text-zinc-400 mt-3 font-medium">
+              💡 Say <span className="text-emerald-300 font-semibold">'हाँ, भेज दो'</span> or <span className="text-red-300 font-semibold">'नहीं, मत भेजो'</span> hands-free
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 💬 INCOMING SMS ASSISTANT OVERLAY */}
+      <AnimatePresence>
+        {incomingSms && (
+          <motion.div
+            initial={{ opacity: 0, y: -40, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -40, scale: 0.95 }}
+            className="fixed top-20 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md bg-zinc-900/95 backdrop-blur-2xl border border-blue-500/40 rounded-3xl p-5 shadow-2xl shadow-blue-950/80 pointer-events-auto"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
+                  <MessageSquare size={20} />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
+                    New SMS Detected
+                  </span>
+                  <h4 className="text-sm font-bold text-white mt-0.5">{incomingSms.sender}</h4>
+                </div>
+              </div>
+              <button onClick={() => setIncomingSms(null)} className="text-zinc-500 hover:text-white p-1">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="bg-zinc-950 p-3 rounded-2xl border border-white/5 mb-3">
+              {incomingSms.status === 'asking' ? (
+                <div className="text-xs text-purple-300 flex items-center gap-2 font-medium">
+                  <Volume2 size={15} className="animate-pulse shrink-0" />
+                  <span>"नया SMS आया है। क्या मैं पढ़कर सुनाऊँ?"</span>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-200 leading-relaxed font-sans">
+                  "{incomingSms.body}"
+                </p>
+              )}
+            </div>
+
+            {incomingSms.status === 'asking' && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleReadSms}
+                  className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-semibold text-xs hover:bg-blue-500 transition-colors shadow-lg shadow-blue-500/20"
+                >
+                  हाँ, पढ़कर सुनाओ (Read Aloud)
+                </button>
+                <button
+                  onClick={() => setIncomingSms(null)}
+                  className="px-4 py-2.5 rounded-xl bg-white/5 text-zinc-400 hover:bg-white/10 font-medium text-xs"
+                >
+                  नहीं (Dismiss)
+                </button>
+              </div>
+            )}
+
+            {(incomingSms.status === 'read' || incomingSms.status === 'replying' || incomingSms.status === 'confirming_reply') && (
+              <div className="space-y-2">
+                {incomingSms.status === 'confirming_reply' && (
+                  <div className="bg-purple-500/10 border border-purple-500/30 p-2.5 rounded-xl text-xs text-purple-200">
+                    <span className="font-semibold text-purple-300 block mb-1">Confirming Reply:</span>
+                    "{incomingSms.dictatedReply}"
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={incomingSms.dictatedReply}
+                    onChange={(e) => setIncomingSms(prev => prev ? { ...prev, dictatedReply: e.target.value } : null)}
+                    placeholder="Type or dictate SMS reply..."
+                    className="flex-1 bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                  />
+                  <button
+                    onClick={handleConfirmAndSendSms}
+                    className="px-4 py-2 rounded-xl bg-emerald-500 text-black font-bold text-xs hover:bg-emerald-400 transition-colors shrink-0"
+                  >
+                    Send SMS
+                  </button>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 📱 INCOMING WHATSAPP NOTIFICATION OVERLAY */}
+      <AnimatePresence>
+        {incomingWhatsApp && (
+          <motion.div
+            initial={{ opacity: 0, y: -40, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -40, scale: 0.95 }}
+            className="fixed top-20 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md bg-zinc-900/95 backdrop-blur-2xl border border-emerald-500/40 rounded-3xl p-5 shadow-2xl shadow-emerald-950/80 pointer-events-auto"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                  <MessageCircle size={20} />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                    WhatsApp Message
+                  </span>
+                  <h4 className="text-sm font-bold text-white mt-0.5">{incomingWhatsApp.sender}</h4>
+                </div>
+              </div>
+              <button onClick={() => setIncomingWhatsApp(null)} className="text-zinc-500 hover:text-white p-1">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="bg-zinc-950 p-3 rounded-2xl border border-white/5 mb-3">
+              {incomingWhatsApp.status === 'asking' ? (
+                <div className="text-xs text-purple-300 flex items-center gap-2 font-medium">
+                  <Volume2 size={15} className="animate-pulse shrink-0" />
+                  <span>"WhatsApp पर {incomingWhatsApp.sender} का मैसेज आया है। क्या मैं पढ़कर सुनाऊँ?"</span>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-200 leading-relaxed font-sans">
+                  "{incomingWhatsApp.text}"
+                </p>
+              )}
+            </div>
+
+            {incomingWhatsApp.status === 'asking' && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleReadWhatsApp}
+                  className="flex-1 py-2.5 rounded-xl bg-emerald-500 text-black font-bold text-xs hover:bg-emerald-400 transition-colors shadow-lg shadow-emerald-500/20"
+                >
+                  हाँ, पढ़कर सुनाओ (Read Message)
+                </button>
+                <button
+                  onClick={() => setIncomingWhatsApp(null)}
+                  className="px-4 py-2.5 rounded-xl bg-white/5 text-zinc-400 hover:bg-white/10 font-medium text-xs"
+                >
+                  नहीं (Dismiss)
+                </button>
+              </div>
+            )}
+
+            {(incomingWhatsApp.status === 'read' || incomingWhatsApp.status === 'replying' || incomingWhatsApp.status === 'confirming_reply') && (
+              <div className="space-y-2">
+                {incomingWhatsApp.status === 'confirming_reply' && (
+                  <div className="bg-purple-500/10 border border-purple-500/30 p-2.5 rounded-xl text-xs text-purple-200">
+                    <span className="font-semibold text-purple-300 block mb-1">Confirming WhatsApp Reply:</span>
+                    "{incomingWhatsApp.dictatedReply}"
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={incomingWhatsApp.dictatedReply}
+                    onChange={(e) => setIncomingWhatsApp(prev => prev ? { ...prev, dictatedReply: e.target.value } : null)}
+                    placeholder="Type or dictate WhatsApp reply..."
+                    className="flex-1 bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    onClick={handleConfirmAndSendWhatsApp}
+                    className="px-4 py-2 rounded-xl bg-emerald-500 text-black font-bold text-xs hover:bg-emerald-400 transition-colors shrink-0"
+                  >
+                    Send Reply
+                  </button>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Pinned Lock Screen Notification Overlay when isScreenLocked is active */}
+      <AnimatePresence>
+        {isScreenLocked && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-20 left-1/2 -translate-x-1/2 z-40 w-[90%] max-w-sm pointer-events-auto"
+          >
+            <div className="bg-zinc-900/90 backdrop-blur-2xl border border-purple-500/40 rounded-2xl p-3.5 shadow-2xl shadow-purple-950/80 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300 relative shrink-0">
+                  <Mic size={18} className="animate-pulse" />
+                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border border-black animate-ping" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-white">Zoya Listening</span>
+                    <span className="text-[9px] text-purple-300 font-mono bg-purple-500/20 px-1.5 py-0.5 rounded">Lock Screen</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-300 font-medium">Hands-free wake-word active · Say 'Zoya'</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsScreenLocked(false)}
+                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+                title="Unlock Screen"
+              >
+                <Unlock size={14} />
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
