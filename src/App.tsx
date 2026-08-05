@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Mic, MicOff, Phone, PhoneCall, PhoneOff, Volume2, VolumeX, Mail, Globe, MessageCircle, Settings, X, Upload, Trash2, Eye, History, MessageSquare, ShieldCheck, ShieldAlert, Cpu, Power, Zap, Bell, Layers, Lock, Unlock, RefreshCw, CheckCircle2, AlertTriangle, Sparkles, Activity, Gauge, Timer, Send, Check } from 'lucide-react';
+import { Mic, MicOff, Phone, PhoneCall, PhoneOff, Volume2, VolumeX, Mail, Globe, MessageCircle, Settings, X, Upload, Trash2, Eye, History, MessageSquare, ShieldCheck, ShieldAlert, Cpu, Power, Zap, Bell, Layers, Lock, Unlock, RefreshCw, CheckCircle2, AlertTriangle, Sparkles, Activity, Gauge, Timer, Send, Check, ChevronRight, ArrowLeft, Sliders, Database, Info } from 'lucide-react';
 import { pcmToBase64 } from './lib/audioUtils';
 import { PCMPlayer } from './pcm-player';
 
@@ -567,11 +567,18 @@ export default function App() {
     dictatedReply: string;
   } | null>(null);
 
-  // Privacy Safeguards State
+  // Privacy Safeguards & Assistant Settings State
   const [requireConsentToRead, setRequireConsentToRead] = useState<boolean>(true);
   const [requireConfirmationToSend, setRequireConfirmationToSend] = useState<boolean>(true);
   const [storeMessageHistory, setStoreMessageHistory] = useState<boolean>(false);
   const [showSmartPermissionsModal, setShowSmartPermissionsModal] = useState<boolean>(false);
+
+  // Settings Sub-Page & Voice Toggles
+  const [settingsSubPage, setSettingsSubPage] = useState<string | null>(null);
+  const [callerAnnouncementEnabled, setCallerAnnouncementEnabled] = useState<boolean>(true);
+  const [notificationReaderEnabled, setNotificationReaderEnabled] = useState<boolean>(true);
+  const [voicePitch, setVoicePitch] = useState<number>(1.0);
+  const [voiceRate, setVoiceRate] = useState<number>(1.0);
 
   // Synchronized refs for real-time speech recognition event handlers
   const incomingCallRef = useRef(incomingCall);
@@ -2385,190 +2392,530 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-4"
           >
             <motion.div 
-              initial={{ y: 50, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 50, opacity: 0 }}
-              className="bg-zinc-900 border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl relative"
+              initial={{ y: 30, opacity: 0, scale: 0.98 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 30, opacity: 0, scale: 0.98 }}
+              className="bg-zinc-900 border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl relative flex flex-col h-[85vh] max-h-[700px]"
             >
-              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
-                <h2 className="text-xl font-medium tracking-wide">Settings</h2>
-                <button onClick={() => setShowSettings(false)} className="p-2 rounded-full hover:bg-white/10 text-zinc-400 hover:text-white transition-colors">
-                  <X size={20} />
+              {/* Top App Bar Header */}
+              <div className="p-4 sm:p-5 border-b border-white/10 flex justify-between items-center bg-zinc-950/80 shrink-0">
+                <div className="flex items-center gap-3">
+                  {settingsSubPage ? (
+                    <button 
+                      type="button"
+                      onClick={() => setSettingsSubPage(null)} 
+                      className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white transition-colors border border-white/5 flex items-center justify-center"
+                      title="Back to Settings"
+                    >
+                      <ArrowLeft size={18} />
+                    </button>
+                  ) : (
+                    <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0">
+                      <Settings size={18} />
+                    </div>
+                  )}
+                  <div>
+                    <h2 className="text-lg font-bold text-white tracking-wide leading-tight">
+                      {settingsSubPage === 'smart_call' ? 'Smart Call & Messaging' : 'Settings'}
+                    </h2>
+                    <p className="text-[11px] text-zinc-400">
+                      {settingsSubPage === 'smart_call' ? 'Caller ID, voice reading & test tools' : 'Zoya AI Assistant Preferences'}
+                    </p>
+                  </div>
+                </div>
+
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setShowSettings(false);
+                    setSettingsSubPage(null);
+                  }} 
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors border border-white/5"
+                >
+                  <X size={18} />
                 </button>
               </div>
               
-              <div className="p-6 space-y-6">
-                {/* Maya Mode Toggle */}
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-medium text-white mb-1">Maya Mode</h3>
-                    <p className="text-sm text-zinc-400">Warmer, natural companion AI</p>
+              {/* Scrollable Content Container */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 custom-scrollbar text-white -webkit-overflow-scrolling-touch">
+                
+                {/* SUB-PAGE: Smart Call & Messaging Settings */}
+                {settingsSubPage === 'smart_call' && (
+                  <div className="space-y-4">
+                    {/* Access Settings Top Banner */}
+                    <div className="p-4 bg-gradient-to-br from-emerald-500/15 via-zinc-900 to-black rounded-2xl border border-emerald-500/30 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+                            <PhoneCall size={18} />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-white block">Notification Listener Service</span>
+                            <span className="text-[10px] text-zinc-400 block">Detects WhatsApp, SMS, Calls &amp; Gmail</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                              (window as any).ToolExecutionEngine.executeTool('openNotificationAccessSettings', '{}');
+                            }
+                          }}
+                          className="text-[10px] px-2.5 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 font-semibold flex items-center gap-1 transition-colors shrink-0"
+                        >
+                          <Bell size={12} /> Access Settings
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Caller Announcement & Notification Reader Toggles */}
+                    <div className="p-4 bg-zinc-950/60 rounded-2xl border border-white/10 space-y-3">
+                      <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Volume2 size={13} /> Voice Announcement &amp; Reader
+                      </h3>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <div>
+                          <span className="text-xs font-medium text-white block">Caller Name Announcement</span>
+                          <span className="text-[10px] text-zinc-400 block">Announces incoming callers ("Susheel, Ravi ka call aa raha hai")</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setCallerAnnouncementEnabled(!callerAnnouncementEnabled)}
+                          className={`w-11 h-6 rounded-full flex items-center p-0.5 transition-colors shrink-0 ${callerAnnouncementEnabled ? 'bg-emerald-500' : 'bg-zinc-800'}`}
+                        >
+                          <motion.div 
+                            layout
+                            className="w-5 h-5 bg-white rounded-full shadow-sm"
+                            animate={{ x: callerAnnouncementEnabled ? 20 : 0 }}
+                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                          />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                        <div>
+                          <span className="text-xs font-medium text-white block">Notification Reader</span>
+                          <span className="text-[10px] text-zinc-400 block">Reads incoming WhatsApp &amp; SMS messages out loud</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setNotificationReaderEnabled(!notificationReaderEnabled)}
+                          className={`w-11 h-6 rounded-full flex items-center p-0.5 transition-colors shrink-0 ${notificationReaderEnabled ? 'bg-emerald-500' : 'bg-zinc-800'}`}
+                        >
+                          <motion.div 
+                            layout
+                            className="w-5 h-5 bg-white rounded-full shadow-sm"
+                            animate={{ x: notificationReaderEnabled ? 20 : 0 }}
+                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Privacy & Safeguards */}
+                    <div className="p-4 bg-zinc-950/60 rounded-2xl border border-white/10 space-y-3">
+                      <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <ShieldCheck size={13} /> Privacy &amp; Confirmation Safeguards
+                      </h3>
+
+                      <div className="flex items-center justify-between text-xs py-1">
+                        <div>
+                          <span className="font-medium text-white block">Require Consent Before Reading</span>
+                          <span className="text-[10px] text-zinc-400 block">Asks "पढ़कर सुनाऊँ?" before reading out message contents</span>
+                        </div>
+                        <input 
+                          type="checkbox" 
+                          checked={requireConsentToRead} 
+                          onChange={(e) => setRequireConsentToRead(e.target.checked)} 
+                          className="w-4 h-4 rounded accent-emerald-500 shrink-0 cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs py-1 border-t border-white/5">
+                        <div>
+                          <span className="font-medium text-white block">Require Confirmation Before Replying</span>
+                          <span className="text-[10px] text-zinc-400 block">Asks voice confirmation ("हाँ, भेज दो") before sending replies</span>
+                        </div>
+                        <input 
+                          type="checkbox" 
+                          checked={requireConfirmationToSend} 
+                          onChange={(e) => setRequireConfirmationToSend(e.target.checked)} 
+                          className="w-4 h-4 rounded accent-emerald-500 shrink-0 cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs py-1 border-t border-white/5">
+                        <div>
+                          <span className="font-medium text-white block">Save Local Message Logs</span>
+                          <span className="text-[10px] text-zinc-400 block">Keep temporary message conversation history for search</span>
+                        </div>
+                        <input 
+                          type="checkbox" 
+                          checked={storeMessageHistory} 
+                          onChange={(e) => setStoreMessageHistory(e.target.checked)} 
+                          className="w-4 h-4 rounded accent-emerald-500 shrink-0 cursor-pointer"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Interactive Test Tools */}
+                    <div className="p-4 bg-zinc-950/60 rounded-2xl border border-white/10 space-y-3">
+                      <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Sparkles size={13} /> Interactive Test Tools
+                      </h3>
+                      <p className="text-[11px] text-zinc-400">Trigger test notifications and voice prompts to verify assistant reactions:</p>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => triggerIncomingCall('Ravi', '+919876543210')}
+                          className="p-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <PhoneCall size={13} /> Test Call: Ravi
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => triggerIncomingCall('Unknown Number', '+919812345678')}
+                          className="p-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <PhoneOff size={13} /> Test Unknown Call
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => triggerIncomingSms('Ravi', '+919876543210', 'Susheel bhai, kal subah 10 baje meeting hai.')}
+                          className="p-2.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 border border-blue-500/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <MessageSquare size={13} /> Test SMS: Ravi
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => triggerIncomingWhatsApp('Amit', 'Bhai shaam ko milte hain coffee pe!')}
+                          className="p-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <MessageCircle size={13} /> Test WhatsApp: Amit
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Future Features Card */}
+                    <div className="p-3 bg-zinc-950/40 rounded-xl border border-white/5 text-center">
+                      <span className="text-[11px] text-zinc-400 block">
+                        ℹ️ All Call, SMS, WhatsApp &amp; Contact voice automation features are configured in this dedicated module.
+                      </span>
+                    </div>
                   </div>
-                  <button 
-                    onClick={() => {
-                       const newMode = !girlfriendMode;
-                       setGirlfriendMode(newMode);
-                       if (connState === 'connected') {
-                          reconnectPendingRef.current = false; // Reset it just in case
-                          disconnect();
-                          setTimeout(connectToZoya, 500);
-                       }
-                    }}
-                    className={`w-14 h-8 rounded-full flex items-center p-1 transition-colors ${girlfriendMode ? 'bg-pink-500' : 'bg-zinc-700'}`}
-                  >
-                    <motion.div 
-                      layout
-                      className="w-6 h-6 bg-white rounded-full shadow-md"
-                      animate={{ x: girlfriendMode ? 24 : 0 }}
-                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                    />
-                  </button>
-                </div>
-                
-                {/* Language Settings */}
-                <div>
-                  <h3 className="text-lg font-medium text-white mb-3">Language</h3>
-                  <select 
-                    value={language}
-                    onChange={(e) => setLanguage(e.target.value)}
-                    className="w-full py-3 px-4 bg-white/10 hover:bg-white/20 rounded-xl transition-colors border border-white/5 text-white outline-none"
-                  >
-                    <option value="hi-IN" className="bg-zinc-800">Hindi (India)</option>
-                    <option value="en-US" className="bg-zinc-800">English (US)</option>
-                    <option value="en-IN" className="bg-zinc-800">English (India)</option>
-                  </select>
-                </div>
-                
-                {/* Wallpaper Settings */}
-                <div>
-                  <h3 className="text-lg font-medium text-white mb-3">Wallpaper</h3>
-                  <div className="flex flex-col gap-3">
-                    <button 
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-white/10 hover:bg-white/20 rounded-xl transition-colors border border-white/5"
+                )}
+
+
+                {/* MAIN SETTINGS PAGE */}
+                {!settingsSubPage && (
+                  <div className="space-y-4">
+
+                    {/* 1. ⚙️ Smart Call & Messaging Featured Navigation Card */}
+                    <button
+                      type="button"
+                      onClick={() => setSettingsSubPage('smart_call')}
+                      className="w-full p-4 bg-gradient-to-r from-emerald-500/15 via-zinc-950 to-zinc-900 hover:from-emerald-500/25 hover:to-zinc-800 rounded-2xl border border-emerald-500/30 flex items-center justify-between transition-all group shadow-md"
                     >
-                      <Upload size={18} />
-                      <span>Upload from Gallery</span>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 group-hover:scale-105 transition-transform">
+                          <PhoneCall size={20} />
+                        </div>
+                        <div className="text-left">
+                          <div className="text-sm font-bold text-white flex items-center gap-1.5">
+                            <span>Smart Call &amp; Messaging</span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">Sub-page</span>
+                          </div>
+                          <p className="text-[11px] text-zinc-400 mt-0.5">Caller ID, voice reading, WhatsApp &amp; SMS test tools</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 text-emerald-400 font-semibold text-xs shrink-0">
+                        <span>Tap to open</span>
+                        <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
+                      </div>
                     </button>
-                    <input 
-                      type="file" 
-                      ref={fileInputRef} 
-                      onChange={handleWallpaperUpload} 
-                      accept="image/*" 
-                      className="hidden" 
-                    />
-                    
-                    {wallpaper && (
-                      <button 
-                        onClick={() => setWallpaper(null)}
-                        className="w-full py-3 px-4 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-xl transition-colors border border-red-500/20"
+
+                    {/* 2. Language Settings */}
+                    <div className="p-4 bg-zinc-950/60 rounded-2xl border border-white/10 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Globe size={16} className="text-blue-400" />
+                        <h3 className="text-sm font-semibold text-white">Language</h3>
+                      </div>
+                      <select 
+                        value={language}
+                        onChange={(e) => setLanguage(e.target.value)}
+                        className="w-full py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 rounded-xl transition-colors border border-white/10 text-white text-xs outline-none cursor-pointer"
                       >
-                        Reset to Default
+                        <option value="hi-IN" className="bg-zinc-800">Hindi (India) - हिन्दी</option>
+                        <option value="en-US" className="bg-zinc-800">English (US)</option>
+                        <option value="en-IN" className="bg-zinc-800">English (India)</option>
+                      </select>
+                    </div>
+
+                    {/* 3. Maya Mode Toggle */}
+                    <div className="p-4 bg-zinc-950/60 rounded-2xl border border-white/10 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-pink-500/20 border border-pink-500/30 flex items-center justify-center text-pink-400 shrink-0">
+                          <Sparkles size={18} />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-semibold text-white">Maya Mode</h3>
+                          <p className="text-[11px] text-zinc-400">Warmer, natural companion AI persona</p>
+                        </div>
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                           const newMode = !girlfriendMode;
+                           setGirlfriendMode(newMode);
+                           if (connState === 'connected') {
+                              reconnectPendingRef.current = false;
+                              disconnect();
+                              setTimeout(connectToZoya, 500);
+                           }
+                        }}
+                        className={`w-12 h-7 rounded-full flex items-center p-0.5 transition-colors shrink-0 ${girlfriendMode ? 'bg-pink-500' : 'bg-zinc-800'}`}
+                      >
+                        <motion.div 
+                          layout
+                          className="w-6 h-6 bg-white rounded-full shadow-md"
+                          animate={{ x: girlfriendMode ? 20 : 0 }}
+                          transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                        />
                       </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* 📞 Smart Call & Messaging Assistant Card */}
-                <div className="p-4 bg-gradient-to-br from-emerald-500/10 via-zinc-900 to-black rounded-2xl border border-emerald-500/30 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                        <PhoneCall size={16} className="text-emerald-400" />
-                        <span>Smart Call &amp; Messaging Assistant</span>
-                      </h3>
-                      <p className="text-[11px] text-zinc-400">Hindi voice announcement, caller ID lookup &amp; Notification Listener</p>
                     </div>
-                    <button
-                      onClick={() => {
-                        if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
-                          (window as any).ToolExecutionEngine.executeTool('openNotificationAccessSettings', '{}');
-                        }
-                      }}
-                      className="text-[10px] px-2.5 py-1 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 font-semibold flex items-center gap-1 transition-colors"
-                    >
-                      <Bell size={12} /> Access Settings
-                    </button>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <button
-                      onClick={() => triggerIncomingCall('Ravi', '+919876543210')}
-                      className="p-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                    >
-                      <PhoneCall size={13} /> Test Call: Ravi
-                    </button>
-                    <button
-                      onClick={() => triggerIncomingCall('Unknown Number', '+919812345678')}
-                      className="p-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                    >
-                      <PhoneOff size={13} /> Test Unknown Call
-                    </button>
-                    <button
-                      onClick={() => triggerIncomingSms('Ravi', '+919876543210', 'Susheel bhai, kal subah 10 baje meeting hai.')}
-                      className="p-2.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 border border-blue-500/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                    >
-                      <MessageSquare size={13} /> Test SMS: Ravi
-                    </button>
-                    <button
-                      onClick={() => triggerIncomingWhatsApp('Amit', 'Bhai shaam ko milte hain coffee pe!')}
-                      className="p-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                    >
-                      <MessageCircle size={13} /> Test WhatsApp: Amit
-                    </button>
-                  </div>
+                    {/* 4. Voice & Speech Controls */}
+                    <div className="p-4 bg-zinc-950/60 rounded-2xl border border-white/10 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Volume2 size={16} className="text-purple-400" />
+                        <h3 className="text-sm font-semibold text-white">Voice &amp; Speech Preferences</h3>
+                      </div>
+                      
+                      <div className="space-y-2 text-xs">
+                        <div>
+                          <div className="flex justify-between text-[11px] text-zinc-300 mb-1">
+                            <span>Speech Speed (Rate): {voiceRate.toFixed(1)}x</span>
+                          </div>
+                          <input 
+                            type="range" 
+                            min="0.7" 
+                            max="1.5" 
+                            step="0.1" 
+                            value={voiceRate} 
+                            onChange={(e) => setVoiceRate(parseFloat(e.target.value))}
+                            className="w-full accent-purple-500"
+                          />
+                        </div>
 
-                  {/* Privacy Controls */}
-                  <div className="pt-2 border-t border-white/10 space-y-2 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-zinc-300">Require Consent Before Reading</span>
-                      <input 
-                        type="checkbox" 
-                        checked={requireConsentToRead} 
-                        onChange={(e) => setRequireConsentToRead(e.target.checked)} 
-                        className="rounded accent-emerald-500"
-                      />
+                        <div>
+                          <div className="flex justify-between text-[11px] text-zinc-300 mb-1">
+                            <span>Voice Pitch: {voicePitch.toFixed(1)}</span>
+                          </div>
+                          <input 
+                            type="range" 
+                            min="0.7" 
+                            max="1.4" 
+                            step="0.1" 
+                            value={voicePitch} 
+                            onChange={(e) => setVoicePitch(parseFloat(e.target.value))}
+                            className="w-full accent-purple-500"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          try {
+                            const testUtterance = new SpeechSynthesisUtterance("नमस्ते, मैं Zoya हूँ। आपकी सहायता के लिए तैयार हूँ।");
+                            testUtterance.lang = language || 'hi-IN';
+                            testUtterance.rate = voiceRate;
+                            testUtterance.pitch = voicePitch;
+                            window.speechSynthesis.speak(testUtterance);
+                          } catch (e) {}
+                        }}
+                        className="w-full py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-500/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <Volume2 size={13} /> Test Voice Synthesis
+                      </button>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-zinc-300">Require Confirmation Before Replying</span>
-                      <input 
-                        type="checkbox" 
-                        checked={requireConfirmationToSend} 
-                        onChange={(e) => setRequireConfirmationToSend(e.target.checked)} 
-                        className="rounded accent-emerald-500"
-                      />
-                    </div>
-                  </div>
-                </div>
 
-                {/* ⭐ Premium Settings Card */}
-                <div className="p-4 bg-gradient-to-br from-amber-500/10 via-zinc-900 to-black rounded-2xl border border-amber-500/20 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-lg font-medium text-white flex items-center gap-2">
-                        <span>⭐ Premium</span>
-                      </h3>
-                      <p className="text-sm text-zinc-400 mt-0.5">Coming Soon</p>
+                    {/* 5. Appearance & Wallpaper */}
+                    <div className="p-4 bg-zinc-950/60 rounded-2xl border border-white/10 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Layers size={16} className="text-cyan-400" />
+                        <h3 className="text-sm font-semibold text-white">Appearance &amp; Wallpaper</h3>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <button 
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 rounded-xl transition-colors border border-white/10 text-xs font-medium"
+                        >
+                          <Upload size={14} />
+                          <span>Upload Wallpaper from Gallery</span>
+                        </button>
+                        <input 
+                          type="file" 
+                          ref={fileInputRef} 
+                          onChange={handleWallpaperUpload} 
+                          accept="image/*" 
+                          className="hidden" 
+                        />
+                        
+                        {wallpaper && (
+                          <button 
+                            type="button"
+                            onClick={() => setWallpaper(null)}
+                            className="w-full py-2 px-3 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-xl transition-colors border border-red-500/20 text-xs font-medium"
+                          >
+                            Reset Wallpaper to Default
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <button 
-                      disabled
-                      className="px-4 py-2 rounded-xl bg-amber-500/10 text-amber-300/50 border border-amber-500/20 text-xs font-medium cursor-not-allowed opacity-60"
-                    >
-                      Coming Soon
-                    </button>
-                  </div>
-                </div>
 
-                {/* Status indicator */}
-                <div className="pt-4 border-t border-white/10">
-                  <div className="flex items-center gap-2 text-sm text-zinc-400">
-                    <div className={`w-2 h-2 rounded-full ${girlfriendMode ? 'bg-pink-500' : 'bg-zinc-500'}`}></div>
-                    <span>Status: {girlfriendMode ? 'Maya Mode ON' : 'Maya Mode OFF'}</span>
+                    {/* 6. Accessibility Settings Shortcut */}
+                    <div className="p-4 bg-zinc-950/60 rounded-2xl border border-white/10 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0">
+                          <Eye size={18} />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-semibold text-white">Accessibility Service</h3>
+                          <p className="text-[11px] text-zinc-400">Screen reading &amp; automated UI taps</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                            (window as any).ToolExecutionEngine.executeTool('openAccessibilitySettings', '{}');
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 text-xs font-semibold transition-colors shrink-0"
+                      >
+                        Open
+                      </button>
+                    </div>
+
+                    {/* 7. System Permissions Quick Access */}
+                    <div className="p-4 bg-zinc-950/60 rounded-2xl border border-white/10 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck size={16} className="text-emerald-400" />
+                        <h3 className="text-sm font-semibold text-white">System Access &amp; Permissions</h3>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                              (window as any).ToolExecutionEngine.executeTool('openOverlaySettings', '{}');
+                            }
+                          }}
+                          className="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-white/5 text-left text-zinc-300 hover:text-white transition-colors"
+                        >
+                          Display Over Apps
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                              (window as any).ToolExecutionEngine.executeTool('openBatteryOptimizationSettings', '{}');
+                            }
+                          }}
+                          className="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-white/5 text-left text-zinc-300 hover:text-white transition-colors"
+                        >
+                          Ignore Battery Opt.
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                              (window as any).ToolExecutionEngine.executeTool('openAutostartSettings', '{}');
+                            }
+                          }}
+                          className="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-white/5 text-left text-zinc-300 hover:text-white transition-colors"
+                        >
+                          OEM Autostart
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (typeof (window as any).ToolExecutionEngine !== 'undefined' && (window as any).ToolExecutionEngine.executeTool) {
+                              (window as any).ToolExecutionEngine.executeTool('openDefaultAssistantSettings', '{}');
+                            }
+                          }}
+                          className="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-white/5 text-left text-zinc-300 hover:text-white transition-colors"
+                        >
+                          Default Assistant
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 8. Memory & Database */}
+                    <div className="p-4 bg-zinc-950/60 rounded-2xl border border-white/10 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Database size={16} className="text-cyan-400" />
+                          <h3 className="text-sm font-semibold text-white">Memory &amp; Persistence</h3>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">Supabase Active</span>
+                      </div>
+                      <p className="text-[11px] text-zinc-400">Stores previous conversation logs and user profiles securely in Cloud memory.</p>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await fetch('/api/memory', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ action: 'delete', deviceId: 'default-device' })
+                            });
+                            setLastAction("Conversation memory cleared successfully.");
+                          } catch (e) {
+                            setLastAction("Failed to clear memory.");
+                          }
+                        }}
+                        className="w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 rounded-xl text-xs font-medium transition-colors"
+                      >
+                        Clear Memory Logs
+                      </button>
+                    </div>
+
+                    {/* 9. ⭐ Premium Settings Card */}
+                    <div className="p-4 bg-gradient-to-br from-amber-500/15 via-zinc-950 to-black rounded-2xl border border-amber-500/30 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                            <Sparkles size={15} className="text-amber-400" />
+                            <span>⭐ Premium Subscription</span>
+                          </h3>
+                          <p className="text-[11px] text-zinc-400 mt-0.5">Free Plan Active (100 daily requests limit)</p>
+                        </div>
+                        <span className="px-2.5 py-1 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold">
+                          Free Plan
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 10. About Section */}
+                    <div className="p-4 bg-zinc-950/60 rounded-2xl border border-white/10 space-y-1 text-center">
+                      <div className="flex items-center justify-center gap-1.5 text-xs text-zinc-300 font-bold">
+                        <Info size={14} className="text-purple-400" /> Zoya AI Voice Assistant v2.5
+                      </div>
+                      <p className="text-[10px] text-zinc-400">Created by Susheel • Cloud Server &amp; Android Real API Engine</p>
+                    </div>
+
                   </div>
-                </div>
+                )}
+
               </div>
             </motion.div>
           </motion.div>
