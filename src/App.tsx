@@ -33,15 +33,25 @@ function PermissionsScreen({ onGranted }: { onGranted: () => void }) {
          }
       } else {
         if (typeof Notification !== 'undefined') {
-          await Notification.requestPermission();
+          try {
+            await Notification.requestPermission();
+          } catch (e) {}
         }
       }
       
-      await navigator.mediaDevices.getUserMedia({ audio: true });
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+      } catch (micErr) {
+        console.warn("Microphone permission denied or unsupported in browser preview:", micErr);
+      }
       setGranted(true);
       setTimeout(onGranted, 500);
     } catch (err) {
-      alert("Microphone & System permissions are required for Zoya Voice & Call Assistant.");
+      console.warn("Permissions setup notice:", err);
+      setGranted(true);
+      setTimeout(onGranted, 500);
     }
   };
 
@@ -220,7 +230,25 @@ export default function App() {
 
   const [dbMemories, setDbMemories] = useState<any[]>([]);
 
-  const [girlfriendMode, setGirlfriendMode] = useState<boolean>(false);
+  const [girlfriendMode, setGirlfriendMode] = useState<boolean>(() => {
+    try {
+      const savedMaya = localStorage.getItem('zoya_assistant_maya_mode');
+      if (savedMaya !== null) return savedMaya === 'true';
+      const savedMode = localStorage.getItem('zoya_assistant_mode');
+      if (savedMode !== null) return savedMode === 'MAYA';
+    } catch (e) {}
+    return false;
+  });
+
+  const girlfriendModeRef = useRef<boolean>(girlfriendMode);
+
+  useEffect(() => {
+    girlfriendModeRef.current = girlfriendMode;
+    try {
+      localStorage.setItem('zoya_assistant_maya_mode', girlfriendMode ? 'true' : 'false');
+      localStorage.setItem('zoya_assistant_mode', girlfriendMode ? 'MAYA' : 'ZOYA');
+    } catch (e) {}
+  }, [girlfriendMode]);
   const [wallpaper, setWallpaper] = useState<string | null>(null);
   const [language, setLanguage] = useState<string>('hi-IN');
   const [showSettings, setShowSettings] = useState(false);
@@ -450,9 +478,20 @@ export default function App() {
           if (data.settings) {
             if (typeof data.settings.girlfriend_mode === 'boolean') {
               setGirlfriendMode(data.settings.girlfriend_mode);
+              girlfriendModeRef.current = data.settings.girlfriend_mode;
+              try {
+                localStorage.setItem('zoya_assistant_maya_mode', data.settings.girlfriend_mode ? 'true' : 'false');
+                localStorage.setItem('zoya_assistant_mode', data.settings.girlfriend_mode ? 'MAYA' : 'ZOYA');
+              } catch(e) {}
             }
             if (data.settings.wallpaper) setWallpaper(data.settings.wallpaper);
             if (data.settings.language) setLanguage(data.settings.language || 'hi-IN');
+          } else {
+            fetch('/api/settings', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ deviceId, settings: { girlfriend_mode: girlfriendModeRef.current, wallpaper, language } })
+            }).catch(() => {});
           }
 
           if (data.memories) {
@@ -1032,32 +1071,49 @@ export default function App() {
   const languageRef = useRef<string>(language);
   useEffect(() => { languageRef.current = language; }, [language]);
 
+  const pendingVoiceMessageRef = useRef<any>(pendingVoiceMessage);
+  useEffect(() => { pendingVoiceMessageRef.current = pendingVoiceMessage; }, [pendingVoiceMessage]);
+
   const isWakeWordListeningRef = useRef<boolean>(false);
   const hasLoggedWakeWordInitRef = useRef<boolean>(false);
+  const wakeWordRestartTimerRef = useRef<any>(null);
+  const wakeWordPermissionDeniedRef = useRef<boolean>(false);
   const connectToZoyaRef = useRef<() => void>(() => {});
 
   const stopWakeWordEngine = useCallback(() => {
-    if (wakeWordRecognizerRef.current) {
-      try {
-        wakeWordRecognizerRef.current.onstart = null;
-        wakeWordRecognizerRef.current.onresult = null;
-        wakeWordRecognizerRef.current.onerror = null;
-        wakeWordRecognizerRef.current.onend = null;
-        wakeWordRecognizerRef.current.abort();
-      } catch (e) {}
-      wakeWordRecognizerRef.current = null;
+    if (wakeWordRestartTimerRef.current) {
+      clearTimeout(wakeWordRestartTimerRef.current);
+      wakeWordRestartTimerRef.current = null;
     }
     isWakeWordListeningRef.current = false;
     isWakeWordStartingRef.current = false;
+
+    if (wakeWordRecognizerRef.current) {
+      try {
+        const rec = wakeWordRecognizerRef.current;
+        wakeWordRecognizerRef.current = null;
+        rec.onstart = null;
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        rec.abort();
+        console.log("[WakeWordLog] Recognizer Destroyed");
+      } catch (e) {}
+    }
   }, []);
 
   // Continuous Wake Word Detection Engine
   const startWakeWordEngine = useCallback(() => {
     if (!wakeWordEnabledRef.current || !permissionsGrantedRef.current) return;
+    if (wakeWordPermissionDeniedRef.current) return;
 
-    // Requirement 1 & 9: Initialize ONLY ONCE & Verify no duplicate listeners exist before starting
+    if (wakeWordRestartTimerRef.current) {
+      clearTimeout(wakeWordRestartTimerRef.current);
+      wakeWordRestartTimerRef.current = null;
+    }
+
+    // Guard: Prevent multiple listeners / duplicate starts
     if (isWakeWordListeningRef.current || isWakeWordStartingRef.current) {
-      console.log("[WakeWordLog] SpeechRecognizer active. Skipping duplicate creation.");
       return;
     }
 
@@ -1067,288 +1123,327 @@ export default function App() {
       return;
     }
 
-    // Requirement 3: Before starting a new listener, stop and destroy the previous one cleanly
-    stopWakeWordEngine();
+    let recognizer = wakeWordRecognizerRef.current;
+
+    if (!recognizer) {
+      try {
+        recognizer = new SpeechRecognition();
+        wakeWordRecognizerRef.current = recognizer;
+
+        recognizer.continuous = true;
+        recognizer.interimResults = true;
+        recognizer.maxAlternatives = 3;
+        recognizer.lang = languageRef.current || 'hi-IN';
+
+        if (!hasLoggedWakeWordInitRef.current) {
+          hasLoggedWakeWordInitRef.current = true;
+          console.log("[WakeWordLog] WakeWord Engine Initialized");
+          setAlwaysOnLogs(prev => [
+            `[${new Date().toLocaleTimeString()}] WakeWord Engine Initialized`,
+            ...prev.slice(0, 15)
+          ]);
+        }
+
+        recognizer.onstart = () => {
+          isWakeWordStartingRef.current = false;
+          isWakeWordListeningRef.current = true;
+          setWakeWordError(null);
+          console.log("[WakeWordLog] Listening Started");
+        };
+
+        recognizer.onresult = (event: any) => {
+          const now = Date.now();
+
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const result = event.results[i];
+            for (let j = 0; j < result.length; ++j) {
+              const transcript = (result[j].transcript || '').toLowerCase().trim();
+              const confidence = Math.round((result[j].confidence || 0.95) * 100);
+
+              // 1. Voice Command Interceptor for Incoming Phone Calls
+              if (incomingCallRef.current && incomingCallRef.current.status === 'ringing') {
+                if (transcript.includes('receive') || transcript.includes('pickup') || transcript.includes('pick') || transcript.includes('उठाओ') || transcript.includes('अटेंड') || transcript.includes('कॉल उठाओ')) {
+                  lastTriggerTimeRef.current = now;
+                  handleAnswerCall(false);
+                  return;
+                }
+                if (transcript.includes('reject') || transcript.includes('cut') || transcript.includes('काटो') || transcript.includes('कॉल काटो') || transcript.includes('decline')) {
+                  lastTriggerTimeRef.current = now;
+                  handleRejectCall();
+                  return;
+                }
+                if (transcript.includes('speaker') || transcript.includes('स्पीकर') || transcript.includes('स्पीकर ऑन')) {
+                  lastTriggerTimeRef.current = now;
+                  handleAnswerCall(true);
+                  return;
+                }
+                if (transcript.includes('mute') || transcript.includes('म्यूट') || transcript.includes('साइलेंट')) {
+                  lastTriggerTimeRef.current = now;
+                  handleMuteCall();
+                  return;
+                }
+              }
+
+              // 2. Voice Command Interceptor for Incoming SMS
+              if (incomingSmsRef.current) {
+                if (incomingSmsRef.current.status === 'asking') {
+                  if (transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('padho') || transcript.includes('read') || transcript.includes('सुनाओ') || transcript.includes('पढ़ो') || transcript.includes('yes')) {
+                    lastTriggerTimeRef.current = now;
+                    handleReadSms();
+                    return;
+                  }
+                  if (transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel') || transcript.includes('छोड़ो')) {
+                    lastTriggerTimeRef.current = now;
+                    setIncomingSms(null);
+                    return;
+                  }
+                } else if (incomingSmsRef.current.status === 'confirming_reply') {
+                  if (transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('bhej do') || transcript.includes('send') || transcript.includes('भेज दो') || transcript.includes('yes')) {
+                    lastTriggerTimeRef.current = now;
+                    handleConfirmAndSendSms();
+                    return;
+                  }
+                  if (transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel')) {
+                    lastTriggerTimeRef.current = now;
+                    setIncomingSms(null);
+                    return;
+                  }
+                }
+              }
+
+              // 3. Voice Command Interceptor for Incoming WhatsApp Notifications
+              if (incomingWhatsAppRef.current) {
+                if (incomingWhatsAppRef.current.status === 'asking') {
+                  if (transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('padho') || transcript.includes('read') || transcript.includes('सुनाओ') || transcript.includes('पढ़ो') || transcript.includes('yes')) {
+                    lastTriggerTimeRef.current = now;
+                    handleReadWhatsApp();
+                    return;
+                  }
+                  if (transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel') || transcript.includes('छोड़ो')) {
+                    lastTriggerTimeRef.current = now;
+                    setIncomingWhatsApp(null);
+                    return;
+                  }
+                } else if (incomingWhatsAppRef.current.status === 'confirming_reply') {
+                  if (transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('bhej do') || transcript.includes('send') || transcript.includes('भेज दो') || transcript.includes('yes')) {
+                    lastTriggerTimeRef.current = now;
+                    handleConfirmAndSendWhatsApp();
+                    return;
+                  }
+                  if (transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel')) {
+                    lastTriggerTimeRef.current = now;
+                    setIncomingWhatsApp(null);
+                    return;
+                  }
+                }
+              }
+
+              // 4. Voice Command Interceptor for Screen Reading & Button Explanation
+              if (transcript.includes('screen padho') || transcript.includes('स्क्रीन पढ़ो') || transcript.includes('read screen') || transcript.includes('स्क्रीन पढ़ के सुनाओ')) {
+                lastTriggerTimeRef.current = now;
+                handleReadScreenAloud();
+                return;
+              }
+
+              if (transcript.includes('yeh button kya hai') || transcript.includes('यह बटन क्या है') || transcript.includes('what is this button') || transcript.includes('बटन क्या है')) {
+                lastTriggerTimeRef.current = now;
+                handleExplainFocusedButton();
+                return;
+              }
+
+              // 5. Voice Command Interceptor for Pending Message Confirmation
+              if (pendingVoiceMessageRef.current) {
+                if (transcript.includes('haan bhej do') || transcript.includes('हाँ भेज दो') || transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('bhej do') || transcript.includes('send it') || transcript.includes('भेज दो')) {
+                  lastTriggerTimeRef.current = now;
+                  handleConfirmSendMessage();
+                  return;
+                }
+                if (transcript.includes('nahin mat bhejo') || transcript.includes('नहीं मत भेजो') || transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel') || transcript.includes('रद्द करो')) {
+                  lastTriggerTimeRef.current = now;
+                  handleCancelSendMessage();
+                  return;
+                }
+              }
+
+              // 6. Voice Command Interceptor for Real Device Messaging
+              if (transcript.includes('whatsapp') || transcript.includes('व्हाट्सएप') || transcript.includes('message') || transcript.includes('संदेश')) {
+                if (transcript.includes('bhejo') || transcript.includes('भेजो') || transcript.includes('send')) {
+                  lastTriggerTimeRef.current = now;
+                  let targetRecipient = "Ravi";
+                  if (transcript.toLowerCase().includes('ravi') || transcript.includes('रवि')) targetRecipient = "Ravi";
+                  
+                  let extractedText = "मैं 10 मिनट में पहुँच रहा हूँ।";
+                  if (transcript.includes(':')) {
+                    extractedText = transcript.substring(transcript.indexOf(':') + 1).trim();
+                  } else if (transcript.includes('कि')) {
+                    extractedText = transcript.substring(transcript.indexOf('कि') + 2).trim();
+                  } else if (transcript.includes('that')) {
+                    extractedText = transcript.substring(transcript.indexOf('that') + 4).trim();
+                  }
+                  
+                  const platform = transcript.includes('telegram') ? 'Telegram' : transcript.includes('sms') ? 'SMS' : transcript.includes('gmail') ? 'Gmail' : 'WhatsApp';
+                  handlePrepareMessage(platform, targetRecipient, extractedText);
+                  return;
+                }
+              }
+
+              // 7. Voice Command Interceptor for Mode Switching ("Maya Mode ON" / "Zoya Mode ON")
+              if (transcript.includes('maya mode on') || transcript.includes('girlfriend mode on') || transcript.includes('maya mode chalu') || transcript.includes('maya mode chaloo') || transcript.includes('माया मोड चालू') || transcript.includes('गर्लफ्रेंड मोड ऑन') || transcript.includes('start maya mode') || transcript.includes('activate maya mode')) {
+                lastTriggerTimeRef.current = now;
+                updateGirlfriendMode(true);
+                try {
+                  const speakMaya = new SpeechSynthesisUtterance("Maya Mode activated. Mera naam Maya hai.");
+                  speakMaya.lang = 'hi-IN';
+                  window.speechSynthesis.speak(speakMaya);
+                } catch (e) {}
+                setLastAction("Maya Mode ON (Persisted)");
+                return;
+              }
+
+              if (transcript.includes('zoya mode on') || transcript.includes('maya mode off') || transcript.includes('girlfriend mode off') || transcript.includes('zoya mode chalu') || transcript.includes('zoya mode chaloo') || transcript.includes('ज़ोया मोड चालू') || transcript.includes('माया मोड बंद') || transcript.includes('start zoya mode') || transcript.includes('activate zoya mode')) {
+                lastTriggerTimeRef.current = now;
+                updateGirlfriendMode(false);
+                try {
+                  const speakZoya = new SpeechSynthesisUtterance("Zoya Mode activated. Mera naam Zoya hai.");
+                  speakZoya.lang = 'hi-IN';
+                  window.speechSynthesis.speak(speakZoya);
+                } catch (e) {}
+                setLastAction("Zoya Mode ON (Persisted)");
+                return;
+              }
+
+              // 8. Voice Command Interceptor for Direct Call Commands
+              if (transcript.includes('call ravi') || transcript.includes('रवि को कॉल करो') || transcript.includes('रवि को कॉल लगाओ') || transcript.includes('call lagao') || (transcript.includes('call') && transcript.includes('ravi'))) {
+                lastTriggerTimeRef.current = now;
+                handlePerformCall('Ravi');
+                return;
+              }
+
+              // Prevent duplicate trigger within 2.5 seconds for wake words
+              if (now - lastTriggerTimeRef.current < 2500) return;
+
+              const WAKE_VARIANTS = [
+                "zoya", "hello zoya", "hi zoya", "hey zoya", "oye zoya", "ok zoya", "okay zoya",
+                "ज़ोया", "हेलो ज़ोया", "हाय ज़ोया", "अरे ज़ोया", "जोया", "हेलो जोया", "ज़ोय", "zoya assistant",
+                "maya", "hello maya", "hi maya", "hey maya", "oye maya", "ok maya", "okay maya",
+                "माया", "हेलो माया", "हाय माया", "अरे माया", "girlfriend mode"
+              ];
+
+              const matchedVariant = WAKE_VARIANTS.find(v => transcript.includes(v));
+              if (matchedVariant) {
+                lastTriggerTimeRef.current = now;
+                setLastWakeWordDetected(transcript);
+                setWakeWordConfidence(confidence);
+                setWakeWordTriggered(true);
+
+                if (matchedVariant.includes('maya') || matchedVariant.includes('girlfriend')) {
+                  if (!girlfriendModeRef.current) {
+                    updateGirlfriendMode(true);
+                  }
+                }
+
+                const activeName = girlfriendModeRef.current ? "Maya" : "Zoya";
+                console.log(`[WakeWordLog] Wake Word Detected: "${matchedVariant}" (${confidence}%)`);
+                setAlwaysOnLogs(prev => [
+                  `[${new Date().toLocaleTimeString()}] Wake Word Detected: "${matchedVariant}" (${confidence}% confidence) - Waking ${activeName}!`,
+                  ...prev.slice(0, 15)
+                ]);
+
+                try {
+                  const wakeBeep = new SpeechSynthesisUtterance(`जी ${activeName} हूँ!`);
+                  wakeBeep.lang = 'hi-IN';
+                  wakeBeep.rate = 1.2;
+                  window.speechSynthesis.speak(wakeBeep);
+                } catch (e) {}
+
+                if (connStateRef.current !== 'connected') {
+                  connectToZoyaRef.current();
+                }
+
+                setTimeout(() => setWakeWordTriggered(false), 3000);
+                return;
+              }
+            }
+          }
+        };
+
+        recognizer.onerror = (event: any) => {
+          const err = event.error || 'unknown';
+          isWakeWordListeningRef.current = false;
+          isWakeWordStartingRef.current = false;
+          console.warn(`[WakeWordLog] Recognition Error: ${err}`);
+
+          if (err === 'not-allowed' || err === 'service-not-allowed') {
+            wakeWordPermissionDeniedRef.current = true;
+            setWakeWordError("Microphone permission missing or denied");
+            setAlwaysOnLogs(prev => [
+              `[${new Date().toLocaleTimeString()}] ERROR: Microphone permission missing. Please grant Microphone access!`,
+              ...prev.slice(0, 15)
+            ]);
+            setLastAction("Microphone permission missing for Wake-Word Engine");
+            return;
+          } else if (err === 'audio-capture' || err === 'busy') {
+            setWakeWordError("Microphone in use by another app");
+            wakeWordRestartTimerRef.current = setTimeout(() => {
+              if (wakeWordEnabledRef.current && permissionsGrantedRef.current && !wakeWordPermissionDeniedRef.current) {
+                console.log("[WakeWordLog] Listening Restarted");
+                startWakeWordEngine();
+              }
+            }, 2000);
+          } else {
+            wakeWordRestartTimerRef.current = setTimeout(() => {
+              if (wakeWordEnabledRef.current && permissionsGrantedRef.current && !wakeWordPermissionDeniedRef.current) {
+                console.log("[WakeWordLog] Listening Restarted");
+                startWakeWordEngine();
+              }
+            }, 300);
+          }
+        };
+
+        recognizer.onend = () => {
+          isWakeWordListeningRef.current = false;
+          isWakeWordStartingRef.current = false;
+
+          if (wakeWordEnabledRef.current && permissionsGrantedRef.current && !wakeWordPermissionDeniedRef.current) {
+            wakeWordRestartTimerRef.current = setTimeout(() => {
+              if (wakeWordEnabledRef.current && permissionsGrantedRef.current && !wakeWordPermissionDeniedRef.current) {
+                console.log("[WakeWordLog] Listening Restarted");
+                startWakeWordEngine();
+              }
+            }, 250);
+          }
+        };
+
+      } catch (e: any) {
+        console.error("[WakeWordLog] Recognition Error: Failed to create SpeechRecognizer", e);
+        isWakeWordListeningRef.current = false;
+        isWakeWordStartingRef.current = false;
+        return;
+      }
+    }
 
     try {
       isWakeWordStartingRef.current = true;
-      const recognizer = new SpeechRecognition();
-      wakeWordRecognizerRef.current = recognizer;
-
-      recognizer.continuous = true;
-      recognizer.interimResults = true; // Enables sub-300ms instant trigger on partial results!
-      recognizer.maxAlternatives = 3;
-      recognizer.lang = languageRef.current || 'hi-IN';
-
-      const WAKE_VARIANTS = [
-        "zoya", "hello zoya", "hi zoya", "hey zoya", "oye zoya", "ok zoya", "okay zoya",
-        "ज़ोया", "हेलो ज़ोया", "हाय ज़ोया", "अरे ज़ोया", "जोया", "हेलो जोया", "ज़ोय", "zoya assistant"
-      ];
-
-      recognizer.onstart = () => {
-        isWakeWordStartingRef.current = false;
-        isWakeWordListeningRef.current = true;
-        setWakeWordError(null);
-        console.log("[WakeWordLog] SpeechRecognizer session started persistently");
-
-        // Requirement 7: Log "WakeWord initialized successfully" ONLY ONCE
-        if (!hasLoggedWakeWordInitRef.current) {
-          hasLoggedWakeWordInitRef.current = true;
-          setAlwaysOnLogs(prev => [
-            `[${new Date().toLocaleTimeString()}] WakeWord initialized successfully (sub-300ms mode active for "Zoya")`,
-            ...prev.slice(0, 15)
-          ]);
-        }
-      };
-
-      recognizer.onresult = (event: any) => {
-        const now = Date.now();
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const result = event.results[i];
-          for (let j = 0; j < result.length; ++j) {
-            const transcript = (result[j].transcript || '').toLowerCase().trim();
-            const confidence = Math.round((result[j].confidence || 0.95) * 100);
-
-            // 1. Voice Command Interceptor for Incoming Phone Calls
-            if (incomingCallRef.current && incomingCallRef.current.status === 'ringing') {
-              if (transcript.includes('receive') || transcript.includes('pickup') || transcript.includes('pick') || transcript.includes('उठाओ') || transcript.includes('अटेंड') || transcript.includes('कॉल उठाओ')) {
-                lastTriggerTimeRef.current = now;
-                handleAnswerCall(false);
-                return;
-              }
-              if (transcript.includes('reject') || transcript.includes('cut') || transcript.includes('काटो') || transcript.includes('कॉल काटो') || transcript.includes('decline')) {
-                lastTriggerTimeRef.current = now;
-                handleRejectCall();
-                return;
-              }
-              if (transcript.includes('speaker') || transcript.includes('स्पीकर') || transcript.includes('स्पीकर ऑन')) {
-                lastTriggerTimeRef.current = now;
-                handleAnswerCall(true);
-                return;
-              }
-              if (transcript.includes('mute') || transcript.includes('म्यूट') || transcript.includes('साइलेंट')) {
-                lastTriggerTimeRef.current = now;
-                handleMuteCall();
-                return;
-              }
-            }
-
-            // 2. Voice Command Interceptor for Incoming SMS
-            if (incomingSmsRef.current) {
-              if (incomingSmsRef.current.status === 'asking') {
-                if (transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('padho') || transcript.includes('read') || transcript.includes('सुनाओ') || transcript.includes('पढ़ो') || transcript.includes('yes')) {
-                  lastTriggerTimeRef.current = now;
-                  handleReadSms();
-                  return;
-                }
-                if (transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel') || transcript.includes('छोड़ो')) {
-                  lastTriggerTimeRef.current = now;
-                  setIncomingSms(null);
-                  return;
-                }
-              } else if (incomingSmsRef.current.status === 'confirming_reply') {
-                if (transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('bhej do') || transcript.includes('send') || transcript.includes('भेज दो') || transcript.includes('yes')) {
-                  lastTriggerTimeRef.current = now;
-                  handleConfirmAndSendSms();
-                  return;
-                }
-                if (transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel')) {
-                  lastTriggerTimeRef.current = now;
-                  setIncomingSms(null);
-                  return;
-                }
-              }
-            }
-
-            // 3. Voice Command Interceptor for Incoming WhatsApp Notifications
-            if (incomingWhatsAppRef.current) {
-              if (incomingWhatsAppRef.current.status === 'asking') {
-                if (transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('padho') || transcript.includes('read') || transcript.includes('सुनाओ') || transcript.includes('पढ़ो') || transcript.includes('yes')) {
-                  lastTriggerTimeRef.current = now;
-                  handleReadWhatsApp();
-                  return;
-                }
-                if (transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel') || transcript.includes('छोड़ो')) {
-                  lastTriggerTimeRef.current = now;
-                  setIncomingWhatsApp(null);
-                  return;
-                }
-              } else if (incomingWhatsAppRef.current.status === 'confirming_reply') {
-                if (transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('bhej do') || transcript.includes('send') || transcript.includes('भेज दो') || transcript.includes('yes')) {
-                  lastTriggerTimeRef.current = now;
-                  handleConfirmAndSendWhatsApp();
-                  return;
-                }
-                if (transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel')) {
-                  lastTriggerTimeRef.current = now;
-                  setIncomingWhatsApp(null);
-                  return;
-                }
-              }
-            }
-
-            // 4. Voice Command Interceptor for Screen Reading & Button Explanation
-            if (transcript.includes('screen padho') || transcript.includes('स्क्रीन पढ़ो') || transcript.includes('read screen') || transcript.includes('स्क्रीन पढ़ के सुनाओ')) {
-              lastTriggerTimeRef.current = now;
-              handleReadScreenAloud();
-              return;
-            }
-
-            if (transcript.includes('yeh button kya hai') || transcript.includes('यह बटन क्या है') || transcript.includes('what is this button') || transcript.includes('बटन क्या है')) {
-              lastTriggerTimeRef.current = now;
-              handleExplainFocusedButton();
-              return;
-            }
-
-            // 5. Voice Command Interceptor for Pending Message Confirmation ("हाँ, भेज दो" / "नहीं, रद्द करो")
-            if (pendingVoiceMessage) {
-              if (transcript.includes('haan bhej do') || transcript.includes('हाँ भेज दो') || transcript.includes('haan') || transcript.includes('हाँ') || transcript.includes('bhej do') || transcript.includes('send it') || transcript.includes('भेज दो')) {
-                lastTriggerTimeRef.current = now;
-                handleConfirmSendMessage();
-                return;
-              }
-              if (transcript.includes('nahin mat bhejo') || transcript.includes('नहीं मत भेजो') || transcript.includes('nahi') || transcript.includes('नहीं') || transcript.includes('cancel') || transcript.includes('रद्द करो')) {
-                lastTriggerTimeRef.current = now;
-                handleCancelSendMessage();
-                return;
-              }
-            }
-
-            // 6. Voice Command Interceptor for Real Device Messaging (WhatsApp, SMS, Telegram, Gmail)
-            if (transcript.includes('whatsapp') || transcript.includes('व्हाट्सएप') || transcript.includes('message') || transcript.includes('संदेश')) {
-              if (transcript.includes('bhejo') || transcript.includes('भेजो') || transcript.includes('send')) {
-                lastTriggerTimeRef.current = now;
-                let targetRecipient = "Ravi";
-                if (transcript.toLowerCase().includes('ravi') || transcript.includes('रवि')) targetRecipient = "Ravi";
-                
-                let extractedText = "मैं 10 मिनट में पहुँच रहा हूँ।";
-                if (transcript.includes(':')) {
-                  extractedText = transcript.substring(transcript.indexOf(':') + 1).trim();
-                } else if (transcript.includes('कि')) {
-                  extractedText = transcript.substring(transcript.indexOf('कि') + 2).trim();
-                } else if (transcript.includes('that')) {
-                  extractedText = transcript.substring(transcript.indexOf('that') + 4).trim();
-                }
-                
-                const platform = transcript.includes('telegram') ? 'Telegram' : transcript.includes('sms') ? 'SMS' : transcript.includes('gmail') ? 'Gmail' : 'WhatsApp';
-                handlePrepareMessage(platform, targetRecipient, extractedText);
-                return;
-              }
-            }
-
-            // 7. Voice Command Interceptor for Direct Call Commands (Real Device Action)
-            if (transcript.includes('call ravi') || transcript.includes('रवि को कॉल करो') || transcript.includes('रवि को कॉल लगाओ') || transcript.includes('call lagao') || (transcript.includes('call') && transcript.includes('ravi'))) {
-              lastTriggerTimeRef.current = now;
-              handlePerformCall('Ravi');
-              return;
-            }
-
-            // Prevent duplicate trigger within 2.5 seconds for wake words
-            if (now - lastTriggerTimeRef.current < 2500) return;
-
-            console.log(`[WakeWordLog] Speech stream (${result.isFinal ? 'final' : 'partial'}): "${transcript}" (${confidence}%)`);
-
-            const matchedVariant = WAKE_VARIANTS.find(v => transcript.includes(v));
-            if (matchedVariant) {
-              lastTriggerTimeRef.current = now;
-              setLastWakeWordDetected(transcript);
-              setWakeWordConfidence(confidence);
-              setWakeWordTriggered(true);
-
-              console.log(`[WakeWordLog] WAKE WORD DETECTED on 1st attempt: "${matchedVariant}" in "${transcript}" (${confidence}%)`);
-              setAlwaysOnLogs(prev => [
-                `[${new Date().toLocaleTimeString()}] WAKE WORD DETECTED: "${matchedVariant}" (${confidence}% confidence) - Waking immediately!`,
-                ...prev.slice(0, 15)
-              ]);
-
-              // Audio / Visual wake feedback
-              try {
-                const wakeBeep = new SpeechSynthesisUtterance("जी Zoya हूँ!");
-                wakeBeep.lang = 'hi-IN';
-                wakeBeep.rate = 1.2;
-                window.speechSynthesis.speak(wakeBeep);
-              } catch (e) {}
-
-              // Automatically start live connection / listening if disconnected
-              if (connStateRef.current !== 'connected') {
-                connectToZoyaRef.current();
-              }
-
-              setTimeout(() => setWakeWordTriggered(false), 3000);
-              return;
-            }
-          }
-        }
-      };
-
-      recognizer.onerror = (event: any) => {
-        const err = event.error || 'unknown';
-        console.warn(`[WakeWordLog] SpeechRecognizer error: ${err}`);
-        isWakeWordListeningRef.current = false;
-        isWakeWordStartingRef.current = false;
-
-        if (err === 'not-allowed' || err === 'service-not-allowed') {
-          setWakeWordError("Microphone permission missing or denied");
-          setAlwaysOnLogs(prev => [
-            `[${new Date().toLocaleTimeString()}] ERROR: Microphone permission missing. Please grant Microphone access!`,
-            ...prev.slice(0, 15)
-          ]);
-          setLastAction("Microphone permission missing for Wake-Word Engine");
-          return;
-        } else if (err === 'audio-capture') {
-          setWakeWordError("Microphone in use by another app");
-        }
-
-        // Requirement 8: Only restart after an actual recognition error or crash
-        setTimeout(() => {
-          if (wakeWordEnabledRef.current && permissionsGrantedRef.current && !isWakeWordListeningRef.current) {
-            try {
-              if (wakeWordRecognizerRef.current) {
-                wakeWordRecognizerRef.current.start();
-              } else {
-                startWakeWordEngine();
-              }
-            } catch (e) {
-              startWakeWordEngine();
-            }
-          }
-        }, 500);
-      };
-
-      recognizer.onend = () => {
-        isWakeWordListeningRef.current = false;
-        isWakeWordStartingRef.current = false;
-
-        // Requirement 6: Keep continuous single listener persistent without recreating engine or logging duplicate init messages
-        if (wakeWordEnabledRef.current && permissionsGrantedRef.current) {
-          setTimeout(() => {
-            if (!isWakeWordListeningRef.current && wakeWordRecognizerRef.current) {
-              try {
-                wakeWordRecognizerRef.current.start();
-              } catch (e) {
-                startWakeWordEngine();
-              }
-            }
-          }, 200);
-        }
-      };
-
       recognizer.start();
     } catch (e: any) {
-      console.error("[WakeWordLog] Error launching SpeechRecognizer:", e);
-      isWakeWordListeningRef.current = false;
       isWakeWordStartingRef.current = false;
-      setTimeout(() => {
-        if (wakeWordEnabledRef.current && permissionsGrantedRef.current && !isWakeWordListeningRef.current) {
-          startWakeWordEngine();
-        }
-      }, 1000);
+      if (e?.name === 'InvalidStateError') {
+        isWakeWordListeningRef.current = true;
+      } else {
+        console.warn("[WakeWordLog] Recognition Error: start() exception", e);
+        stopWakeWordEngine();
+        wakeWordRestartTimerRef.current = setTimeout(() => {
+          if (wakeWordEnabledRef.current && permissionsGrantedRef.current && !wakeWordPermissionDeniedRef.current) {
+            startWakeWordEngine();
+          }
+        }, 300);
+      }
     }
   }, [stopWakeWordEngine]);
 
   useEffect(() => {
     if (permissionsGranted && wakeWordEnabled) {
+      wakeWordPermissionDeniedRef.current = false;
       startWakeWordEngine();
     } else {
       stopWakeWordEngine();
@@ -1374,7 +1469,7 @@ export default function App() {
       ws.onopen = async () => {
         setConnState('connected');
         
-        ws.send(JSON.stringify({ type: 'init', deviceId, girlfriendMode, memories, conversations }));
+        ws.send(JSON.stringify({ type: 'init', deviceId, girlfriendMode: girlfriendModeRef.current, memories, conversations }));
         
         // Setup Audio Contexts
         const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -1382,22 +1477,29 @@ export default function App() {
         
         pcmPlayerRef.current = new PCMPlayer(24000);
 
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        streamRef.current = stream;
-        
-        const source = inputCtx.createMediaStreamSource(stream);
-        const processor = inputCtx.createScriptProcessor(4096, 1, 1);
-        processorRef.current = processor;
-        
-        source.connect(processor);
-        processor.connect(inputCtx.destination);
-        
-        processor.onaudioprocess = (e) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            const base64 = pcmToBase64(e.inputBuffer.getChannelData(0));
-            ws.send(JSON.stringify({ audio: base64 }));
+        try {
+          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            streamRef.current = stream;
+            
+            const source = inputCtx.createMediaStreamSource(stream);
+            const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+            processorRef.current = processor;
+            
+            source.connect(processor);
+            processor.connect(inputCtx.destination);
+            
+            processor.onaudioprocess = (e) => {
+              if (ws.readyState === WebSocket.OPEN) {
+                const base64 = pcmToBase64(e.inputBuffer.getChannelData(0));
+                ws.send(JSON.stringify({ audio: base64 }));
+              }
+            };
           }
-        };
+        } catch (micErr) {
+          console.warn("Microphone access unavailable or denied in web browser:", micErr);
+          setLastAction("Mic access restricted. Text & Voice fallback active.");
+        }
       };
 
       ws.onmessage = (event) => {
@@ -1483,7 +1585,7 @@ export default function App() {
       };
       
       ws.onerror = (err) => {
-        console.error("WebSocket Error:", err);
+        console.warn("WebSocket status update:", err);
         setConnState('error');
         // Will trigger onclose and attempt reconnect
       };
@@ -1581,11 +1683,10 @@ export default function App() {
       saveConversationMessage('assistant', `[Memory Saved] ${memoryText}`);
       return;
     } else if (name === "setGirlfriendMode") {
-      actionDesc = `Girlfriend Mode ${args.enable ? 'ON' : 'OFF'}`;
+      const enable = Boolean(args.enable);
+      actionDesc = `Girlfriend Mode ${enable ? 'ON (Maya)' : 'OFF (Zoya)'}`;
       setLastAction(actionDesc);
-      setGirlfriendMode(args.enable);
-      
-      reconnectPendingRef.current = true;
+      updateGirlfriendMode(enable);
       sendToolResponse(id, name, actionDesc);
       saveConversationMessage('assistant', actionDesc);
       return;
@@ -1859,6 +1960,43 @@ export default function App() {
     setConnState('disconnected');
     setUiState('idle');
   };
+
+  const updateGirlfriendMode = useCallback((enable: boolean) => {
+    setGirlfriendMode(enable);
+    girlfriendModeRef.current = enable;
+    try {
+      localStorage.setItem('zoya_assistant_maya_mode', enable ? 'true' : 'false');
+      localStorage.setItem('zoya_assistant_mode', enable ? 'MAYA' : 'ZOYA');
+    } catch (e) {}
+
+    fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId, settings: { girlfriend_mode: enable, wallpaper, language } })
+    }).catch(() => {});
+
+    const nativeEngine = (window as any).ToolExecutionEngine || (window as any).ZoyaNative;
+    if (typeof nativeEngine !== 'undefined' && typeof nativeEngine.executeTool === 'function') {
+      try {
+        nativeEngine.executeTool('setGirlfriendMode', JSON.stringify({ enable }));
+      } catch (e) {}
+    }
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      if (wsRef.current) {
+        const ws = wsRef.current;
+        wsRef.current = null;
+        ws.close();
+      }
+      setConnState('disconnected');
+      setUiState('idle');
+      setTimeout(() => {
+        if (connectToZoyaRef.current) {
+          connectToZoyaRef.current();
+        }
+      }, 400);
+    }
+  }, [deviceId, wallpaper, language]);
 
   if (!permissionsGranted) {
     return <PermissionsScreen onGranted={() => setPermissionsGranted(true)} />;
@@ -2670,15 +2808,7 @@ export default function App() {
                       </div>
                       <button 
                         type="button"
-                        onClick={() => {
-                           const newMode = !girlfriendMode;
-                           setGirlfriendMode(newMode);
-                           if (connState === 'connected') {
-                              reconnectPendingRef.current = false;
-                              disconnect();
-                              setTimeout(connectToZoya, 500);
-                           }
-                        }}
+                        onClick={() => updateGirlfriendMode(!girlfriendMode)}
                         className={`w-12 h-7 rounded-full flex items-center p-0.5 transition-colors shrink-0 ${girlfriendMode ? 'bg-pink-500' : 'bg-zinc-800'}`}
                       >
                         <motion.div 
